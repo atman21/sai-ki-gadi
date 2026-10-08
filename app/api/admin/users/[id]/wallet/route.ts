@@ -16,7 +16,7 @@ const ALLOWED_SOURCES = new Set([
 function normalizeAmount(value: unknown): number | null {
   const amount = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(amount) || amount <= 0) return null;
-  if (Math.round(amount * 100) !== amount * 100) return null;
+  if (Math.abs(amount - Number(amount.toFixed(2))) > 1e-9) return null;
   return amount;
 }
 
