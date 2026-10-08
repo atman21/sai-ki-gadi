@@ -128,7 +128,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       setError("Enter a valid amount.");
       return;
     }
-    if (Math.round(parsedAmount * 100) !== parsedAmount * 100) {
+    if (Math.abs(parsedAmount - Number(parsedAmount.toFixed(2))) > 1e-9) {
       setError("Amount can have maximum 2 decimal places.");
       return;
     }
