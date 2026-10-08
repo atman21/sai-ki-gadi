@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type WalletTransaction = {
   id: string;
@@ -85,6 +85,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
   const [source, setSource] = useState("lucky_draw_prize");
   const [remarks, setRemarks] = useState("");
   const [referenceId, setReferenceId] = useState("");
+  const pendingSubmission = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const loadWallet = useCallback(async () => {
     setError(null);
@@ -99,6 +100,9 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       setBalance(Number(data.wallet.balance));
       setTransactions(data.wallet.transactions);
     } catch (err) {
+      if (balance == null) {
+        setTransactions([]);
+      }
       setError(err instanceof Error ? err.message : "Unable to load wallet.");
     } finally {
       setLoading(false);
@@ -146,6 +150,20 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
     );
     if (!confirmed) return;
 
+    const fingerprint = JSON.stringify({
+      transaction_type: transactionType,
+      amount: parsedAmount,
+      source,
+      remarks: remarks.trim(),
+      reference_id: referenceId.trim() || null,
+    });
+    if (!pendingSubmission.current || pendingSubmission.current.fingerprint !== fingerprint) {
+      pendingSubmission.current = {
+        fingerprint,
+        key: newIdempotencyKey(),
+      };
+    }
+
     setPosting(true);
     try {
       const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/wallet`, {
@@ -158,7 +176,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
           remarks: remarks.trim(),
           reference_type: referenceId.trim() ? source : null,
           reference_id: referenceId.trim() || null,
-          idempotency_key: newIdempotencyKey(),
+          idempotency_key: pendingSubmission.current.key,
         }),
       });
       const data = (await response.json()) as { ok: boolean; error?: string };
@@ -166,6 +184,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
         throw new Error(data.error || "Unable to post wallet transaction.");
       }
 
+      pendingSubmission.current = null;
       setAmount("");
       setRemarks("");
       setReferenceId("");
@@ -191,7 +210,11 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
         <div className="rounded-xl bg-slate-900 px-5 py-3 text-white">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Current Balance</p>
           <p className="mt-1 text-2xl font-bold">
-            {loading && balance == null ? "Loading..." : money(balance ?? 0)}
+            {loading && balance == null
+              ? "Loading..."
+              : balance == null
+                ? "Unavailable"
+                : money(balance)}
           </p>
         </div>
       </div>
@@ -274,7 +297,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
         <div className="mt-4 flex justify-end">
           <button
             type="submit"
-            disabled={posting || loading}
+            disabled={posting || loading || balance == null}
             className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             {posting ? "Posting..." : transactionType === "credit" ? "Add Credit" : "Add Debit"}
@@ -309,6 +332,8 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
             <tbody className="divide-y divide-slate-100 bg-white">
               {loading && transactions.length === 0 ? (
                 <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">Loading wallet...</td></tr>
+              ) : balance == null && error ? (
+                <tr><td colSpan={8} className="px-3 py-8 text-center font-semibold text-red-600">Wallet data unavailable. Refresh before posting any transaction.</td></tr>
               ) : transactions.length === 0 ? (
                 <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">No wallet transactions yet.</td></tr>
               ) : (
