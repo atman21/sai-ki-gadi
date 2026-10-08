@@ -1,6 +1,7 @@
 import { BackButton } from "@/app/components/back-button";
 import { notFound } from "next/navigation";
 
+import { AdminWalletPanel } from "@/app/dashboard/components/admin-wallet-panel";
 import {
   ADMIN_USER_DETAIL_SELECT,
   AdminUserProfileSections,
@@ -192,6 +193,8 @@ export default async function UserDetailPage({
           user={user}
           aadhaarNumber={docs?.aadhaar_number ?? null}
         />
+
+        <AdminWalletPanel userId={id} />
 
         <DocumentManager
           userId={id}
