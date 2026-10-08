@@ -100,9 +100,6 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       setBalance(Number(data.wallet.balance));
       setTransactions(data.wallet.transactions);
     } catch (err) {
-      if (balance == null) {
-        setTransactions([]);
-      }
       setError(err instanceof Error ? err.message : "Unable to load wallet.");
     } finally {
       setLoading(false);
