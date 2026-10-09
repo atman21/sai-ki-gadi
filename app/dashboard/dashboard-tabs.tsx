@@ -5630,6 +5630,7 @@ export function DashboardTabs({
                                 setWinnerSlot(winner.slot);
 
                                 setWinnerImage(winner.image ?? "");
+                                setWinnerCity(winner.city ?? "");
                                 setWinnerMediaType(
                                   winner.media_type === "video"
                                     ? "video"
