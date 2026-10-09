@@ -47,13 +47,19 @@ export async function PUT(
     const body = await request.json();
 
     const { id } = await context.params;
+    if (typeof body.winner_text !== "string" || !body.winner_text.trim()) {
+      return NextResponse.json({ success: false, error: "Winner text is required" }, { status: 400 });
+    }
+    if (body.winner_text.length > 5000) {
+      return NextResponse.json({ success: false, error: "Winner text is too long" }, { status: 400 });
+    }
     const mediaType = normalizeMediaType(body.media_type);
     const payload = {
-      user_id: body.user_id,
+      user_id: null,
+      winner_text: typeof body.winner_text === "string" ? body.winner_text.trim() : "",
       date: body.date,
-      slot: body.slot ?? "",
+      slot: "",
       image: typeof body.image === "string" ? body.image.trim() || null : null,
-      city: typeof body.city === "string" ? body.city.trim().slice(0,120) || null : null,
       media_type: mediaType,
     };
 
@@ -87,6 +93,7 @@ export async function PUT(
         .from("winners")
         .update({
           user_id: payload.user_id,
+          winner_text: payload.winner_text,
           date: payload.date,
           slot: payload.slot,
           image: payload.image,
