@@ -1205,6 +1205,8 @@ export function DashboardTabs({
     userId: string,
     membershipType: string,
     membershipDurationDays?: number,
+    membershipAmount?: number | null,
+    membershipReference?: string | null,
   ) => {
     try {
       const response = await fetch(`/api/admin/users/${userId}`, {
@@ -1215,6 +1217,9 @@ export function DashboardTabs({
         body: JSON.stringify({
           membership_type: membershipType,
           membership_duration_days: membershipDurationDays,
+          membership_amount: membershipAmount,
+          membership_payment_reference: membershipReference,
+          membership_payment_status: membershipAmount != null ? "paid" : "not_recorded",
         }),
       });
 
@@ -3558,7 +3563,13 @@ export function DashboardTabs({
                                     return;
                                   }
 
-                                  updateMembership(user.id, "gold", duration);
+                                  const amountText = prompt("Amount received in ₹ (leave empty if unknown)", "");
+                                  if (amountText === null) return;
+                                  const amount = amountText.trim() ? Number(amountText) : null;
+                                  if (amount !== null && (!Number.isFinite(amount) || amount < 0)) { alert("Invalid amount"); return; }
+                                  const reference = prompt("Payment reference / UTR (optional)", "");
+                                  if (reference === null) return;
+                                  updateMembership(user.id, "gold", duration, amount, reference);
                                 } else {
                                   updateMembership(user.id, "regular");
                                 }
