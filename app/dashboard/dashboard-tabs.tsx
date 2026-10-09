@@ -90,6 +90,7 @@ type WinnersUser = {
   date: string;
   slot: string;
   image: string | null;
+  city?: string | null;
   media_type?: WinnerMediaType | null;
   created_at: string;
   users: {
@@ -622,6 +623,7 @@ export function DashboardTabs({
   const [winnerSlot, setWinnerSlot] = useState("");
 
   const [winnerImage, setWinnerImage] = useState("");
+  const [winnerCity, setWinnerCity] = useState("");
 
   const [winnerMediaType, setWinnerMediaType] =
     useState<WinnerMediaType>("image");
@@ -1969,6 +1971,7 @@ export function DashboardTabs({
           date: winnerDate,
           slot: winnerSlot,
           image: winnerImage,
+          city: winnerCity.trim(),
           media_type: winnerMediaType,
         }),
       });
@@ -2001,6 +2004,7 @@ export function DashboardTabs({
       setWinnerDate("");
       setWinnerSlot("");
       setWinnerImage("");
+      setWinnerCity("");
       setWinnerMediaType("image");
       setEditingWinnerId(null);
 
@@ -3394,7 +3398,7 @@ export function DashboardTabs({
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      User
+                      Winner
                     </th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Phone
@@ -5528,7 +5532,9 @@ export function DashboardTabs({
                     </th>
 
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Slot
+                      City
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Slot
                     </th>
 
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
@@ -5550,7 +5556,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={7}
+                        colSpan={8}
                       >
                         No winners found.
                       </td>
@@ -5569,6 +5575,7 @@ export function DashboardTabs({
                         <td className="px-4 py-3 text-slate-600">
                           {winner.date}
                         </td>
+                        <td className="px-4 py-3 text-slate-600">{winner.city || "—"}</td>
 
                         <td className="px-4 py-3">
                           <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
@@ -5833,6 +5840,10 @@ export function DashboardTabs({
               </div>
 
               <div>
+                <label className="mb-1 block text-sm font-semibold text-slate-700">Winner City</label>
+                <input type="text" maxLength={120} value={winnerCity} onChange={(e) => setWinnerCity(e.target.value)} placeholder="Enter city" className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900" />
+              </div>
+              <div>
                 <label className="mb-1 block text-sm font-semibold text-slate-700">
                   Slot
                 </label>
@@ -5941,8 +5952,7 @@ export function DashboardTabs({
                   uploadingImage ||
                   !selectedUserId ||
                   !winnerDate ||
-                  !winnerSlot ||
-                  !winnerImage
+                  !winnerSlot
                 }
                 className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
