@@ -571,6 +571,21 @@ export function DashboardTabs({
   const [exchangeFromDate, setExchangeFromDate] = useState("");
   const [exchangeToDate, setExchangeToDate] = useState("");
   const [userSearch, setUserSearch] = useState("");
+  const [membershipHistoryUser, setMembershipHistoryUser] = useState<{id:string,name:string}|null>(null);
+  const [membershipHistory, setMembershipHistory] = useState<Array<{id:string,membership_type:string,starts_at:string|null,expires_at:string|null,duration_days:number|null,amount:number|null,payment_reference:string|null,payment_status:string,status:string,source:string}>>([]);
+  const [membershipHistoryLoading, setMembershipHistoryLoading] = useState(false);
+  const [membershipHistoryError, setMembershipHistoryError] = useState("");
+  async function showMembershipHistory(user:{id:string,first_name:string|null,last_name:string|null}) {
+    setMembershipHistoryUser({id:user.id,name:[user.first_name,user.last_name].filter(Boolean).join(" ")||"User"});
+    setMembershipHistoryLoading(true); setMembershipHistoryError(""); setMembershipHistory([]);
+    try {
+      const response=await fetch(`/api/admin/users/${encodeURIComponent(user.id)}/membership-history`);
+      const data=await response.json();
+      if(!response.ok) throw new Error(data.error||"History could not be loaded");
+      setMembershipHistory(data.history||[]);
+    }catch(error){setMembershipHistoryError(error instanceof Error?error.message:"Unable to load history");}
+    finally{setMembershipHistoryLoading(false);}
+  }
 
   const [userMembership, setUserMembership] = useState("all");
 
@@ -3292,6 +3307,15 @@ export function DashboardTabs({
         </>
       ) : activeTab === "users" ? (
         <>
+          {membershipHistoryUser ? <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => setMembershipHistoryUser(null)}>
+            <div className="admin-card max-h-[85vh] w-full max-w-3xl overflow-y-auto p-5" role="dialog" aria-modal="true" aria-label="Membership history" onClick={(e)=>e.stopPropagation()}>
+              <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-lg font-semibold">Membership History — {membershipHistoryUser.name}</h2><button type="button" className="admin-btn admin-btn-secondary" onClick={()=>setMembershipHistoryUser(null)}>Close</button></div>
+              {membershipHistoryLoading ? <p>Loading membership history…</p> : membershipHistoryError ? <p className="text-red-600">{membershipHistoryError}</p> : membershipHistory.length===0 ? <p>No historical records available.</p> :
+              <div className="overflow-x-auto"><table className="admin-table"><thead><tr>{["Plan","From","To","Days","Amount","Payment","Reference","Status","Source"].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{membershipHistory.map(h=><tr key={h.id}>
+                <td>{h.membership_type}</td><td>{h.starts_at?formatDateTime(h.starts_at):"—"}</td><td>{h.expires_at?formatDateTime(h.expires_at):"—"}</td><td>{h.duration_days??"—"}</td><td>{h.amount==null?"Unknown":`₹${h.amount}`}</td><td>{h.payment_status}</td><td>{h.payment_reference||"—"}</td><td>{h.status}</td><td>{h.source==="legacy_snapshot"?"Historical snapshot":h.source}</td>
+              </tr>)}</tbody></table></div>}
+            </div>
+          </div> : null}
           <div className="mb-4 flex justify-end">
             <button
               type="button"
@@ -3457,6 +3481,12 @@ export function DashboardTabs({
                       Total Posts
                     </th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Membership Status
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Membership History
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
                       Rating
                     </th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
@@ -3481,7 +3511,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={27}
+                        colSpan={29}
                       >
                         No users found.
                       </td>
@@ -3511,7 +3541,7 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3">
                           <div onClick={(e) => e.stopPropagation()}>
                             <select
-                              defaultValue={user.membership_type ?? "regular"}
+                              defaultValue={user.membership_type === "gold" && user.membership_expires_at && new Date(user.membership_expires_at).getTime()>Date.now() ? "gold" : "regular"}
                               className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-800"
                               onChange={(e) => {
                                 const type = e.target.value;
@@ -3645,6 +3675,8 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
                           {user.total_posts ?? 0}
                         </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold">{user.membership_type==="gold" && user.membership_expires_at && new Date(user.membership_expires_at).getTime()>Date.now()?"Gold Active":"Regular / Expired"}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center" onClick={e=>e.stopPropagation()}><button type="button" className="admin-btn admin-btn-secondary" onClick={()=>void showMembershipHistory(user)}>View History</button></td>
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
                           {user.rating_average != null
                             ? Number(user.rating_average).toFixed(2)
