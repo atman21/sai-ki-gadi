@@ -39,18 +39,6 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
 
-    if (!body.image || typeof body.image !== "string" || !body.image.trim()) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Media URL is required",
-        },
-        {
-          status: 400,
-        },
-      );
-    }
-
     if (!body.user_id || typeof body.user_id !== "string") {
       return NextResponse.json(
         {
@@ -80,7 +68,8 @@ export async function POST(request: Request) {
       user_id: body.user_id,
       date: body.date,
       slot: body.slot ?? "",
-      image: body.image.trim(),
+      image: typeof body.image === "string" ? body.image.trim() || null : null,
+      city: typeof body.city === "string" ? body.city.trim().slice(0,120) || null : null,
       media_type: mediaType,
     };
 
