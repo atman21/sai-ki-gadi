@@ -46,25 +46,14 @@ export async function PUT(
   try {
     const body = await request.json();
 
-    if (!body.image || typeof body.image !== "string" || !body.image.trim()) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Media URL is required",
-        },
-        {
-          status: 400,
-        },
-      );
-    }
-
     const { id } = await context.params;
     const mediaType = normalizeMediaType(body.media_type);
     const payload = {
       user_id: body.user_id,
       date: body.date,
       slot: body.slot ?? "",
-      image: body.image.trim(),
+      image: typeof body.image === "string" ? body.image.trim() || null : null,
+      city: typeof body.city === "string" ? body.city.trim().slice(0,120) || null : null,
       media_type: mediaType,
     };
 
