@@ -90,6 +90,7 @@ type WinnersUser = {
   date: string;
   slot: string;
   image: string | null;
+  winner_text?: string | null;
   media_type?: WinnerMediaType | null;
   created_at: string;
   users: {
@@ -135,7 +136,20 @@ type AppUser = {
   availability_count: number;
   driver_requirement_count: number;
   total_posts: number;
+  trip_points: number;
+  trips_assigned_by: number;
+  trips_assigned_to: number;
 };
+
+/** Membership state is separate from user account ON/OFF status. */
+function getMembershipStatus(user: Pick<UserRow, "membership_type" | "membership_started_at" | "membership_expires_at">, now = Date.now()): "Active" | "Expired" | "Not Subscribed" {
+  if (!user.membership_type || user.membership_type === "regular") return "Not Subscribed";
+  const expiry = user.membership_expires_at ? Date.parse(user.membership_expires_at) : NaN;
+  const start = user.membership_started_at ? Date.parse(user.membership_started_at) : NaN;
+  if (!Number.isFinite(expiry)) return "Expired";
+  if (Number.isFinite(start) && start > now) return "Expired";
+  return expiry > now ? "Active" : "Expired";
+}
 
 const USER_ROLE_LABELS: Record<string, string> = {
   car_owner: "Car Owner",
@@ -571,6 +585,21 @@ export function DashboardTabs({
   const [exchangeFromDate, setExchangeFromDate] = useState("");
   const [exchangeToDate, setExchangeToDate] = useState("");
   const [userSearch, setUserSearch] = useState("");
+  const [membershipHistoryUser, setMembershipHistoryUser] = useState<{id:string,name:string}|null>(null);
+  const [membershipHistory, setMembershipHistory] = useState<Array<{id:string,membership_type:string,starts_at:string|null,expires_at:string|null,duration_days:number|null,amount:number|null,payment_reference:string|null,payment_status:string,status:string,source:string}>>([]);
+  const [membershipHistoryLoading, setMembershipHistoryLoading] = useState(false);
+  const [membershipHistoryError, setMembershipHistoryError] = useState("");
+  async function showMembershipHistory(user:{id:string,first_name:string|null,last_name:string|null}) {
+    setMembershipHistoryUser({id:user.id,name:[user.first_name,user.last_name].filter(Boolean).join(" ")||"User"});
+    setMembershipHistoryLoading(true); setMembershipHistoryError(""); setMembershipHistory([]);
+    try {
+      const response=await fetch(`/api/admin/users/${encodeURIComponent(user.id)}/membership-history`);
+      const data=await response.json();
+      if(!response.ok) throw new Error(data.error||"History could not be loaded");
+      setMembershipHistory(data.history||[]);
+    }catch(error){setMembershipHistoryError(error instanceof Error?error.message:"Unable to load history");}
+    finally{setMembershipHistoryLoading(false);}
+  }
 
   const [userMembership, setUserMembership] = useState("all");
 
@@ -583,6 +612,28 @@ export function DashboardTabs({
   const [userToDate, setUserToDate] = useState("");
   const [userSort, setUserSort] = useState<UserSortKey>("created_newest");
   const [birthdaySearch, setBirthdaySearch] = useState("");
+  const [dobEdit, setDobEdit] = useState<{ id: string; name: string; date: string } | null>(null);
+  const [dobSaving, setDobSaving] = useState(false);
+  const [dobError, setDobError] = useState("");
+  const [dobOverrides, setDobOverrides] = useState<Record<string, string>>({});
+  async function saveDob() {
+    if (!dobEdit || dobSaving) return;
+    setDobSaving(true);
+    setDobError("");
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(dobEdit.id)}/birth-date`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ birth_date: dobEdit.date }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error ?? "Unable to update DOB");
+      setDobOverrides(prev => ({ ...prev, [dobEdit.id]: result.user.birth_date }));
+      setDobEdit(null);
+      router.refresh();
+    } catch (error) {
+      setDobError(error instanceof Error ? error.message : "Unable to update DOB");
+    } finally { setDobSaving(false); }
+  }
   const [birthdayExactDate, setBirthdayExactDate] = useState("");
   const [birthdayFromDate, setBirthdayFromDate] = useState("");
   const [birthdayToDate, setBirthdayToDate] = useState("");
@@ -618,6 +669,7 @@ export function DashboardTabs({
   const [selectedUserId, setSelectedUserId] = useState("");
 
   const [winnerDate, setWinnerDate] = useState("");
+  const [winnerText, setWinnerText] = useState("");
 
   const [winnerSlot, setWinnerSlot] = useState("");
 
@@ -1190,6 +1242,8 @@ export function DashboardTabs({
     userId: string,
     membershipType: string,
     membershipDurationDays?: number,
+    membershipAmount?: number | null,
+    membershipReference?: string | null,
   ) => {
     try {
       const response = await fetch(`/api/admin/users/${userId}`, {
@@ -1200,6 +1254,9 @@ export function DashboardTabs({
         body: JSON.stringify({
           membership_type: membershipType,
           membership_duration_days: membershipDurationDays,
+          membership_amount: membershipAmount,
+          membership_payment_reference: membershipReference,
+          membership_payment_status: membershipAmount != null ? "paid" : "not_recorded",
         }),
       });
 
@@ -1364,7 +1421,7 @@ export function DashboardTabs({
 
       if (!matchesSearch) return false;
 
-      const dob = parseBirthDateValue(user.birth_date);
+      const dob = parseBirthDateValue(dobOverrides[user.id] ?? user.birth_date);
 
       if (birthdayPreset === "not_set") {
         return dob == null;
@@ -1414,8 +1471,8 @@ export function DashboardTabs({
     };
 
     return [...filtered].sort((a, b) => {
-      const aTime = dobTime(a.birth_date);
-      const bTime = dobTime(b.birth_date);
+      const aTime = dobTime(dobOverrides[a.id] ?? a.birth_date);
+      const bTime = dobTime(dobOverrides[b.id] ?? b.birth_date);
 
       // Missing DOB last for both sort directions
       if (aTime == null && bTime == null) return 0;
@@ -1432,6 +1489,7 @@ export function DashboardTabs({
     birthdayToDate,
     birthdayPreset,
     birthdaySort,
+    dobOverrides,
   ]);
 
   const birthdayTotalPages = Math.max(
@@ -1965,11 +2023,8 @@ export function DashboardTabs({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          user_id: selectedUserId,
           date: winnerDate,
-          slot: winnerSlot,
-          image: winnerImage,
-          media_type: winnerMediaType,
+          winner_text: winnerText,
         }),
       });
 
@@ -1999,6 +2054,7 @@ export function DashboardTabs({
 
       setSelectedUserId("");
       setWinnerDate("");
+      setWinnerText("");
       setWinnerSlot("");
       setWinnerImage("");
       setWinnerMediaType("image");
@@ -2246,6 +2302,7 @@ export function DashboardTabs({
         "User Roles": formatUserRolesCell(user.user_roles),
         "Membership Start": formatDateTime(user.membership_started_at),
         "Membership End": formatDateTime(user.membership_expires_at),
+        "Membership Status": getMembershipStatus(user),
         Verification: user.verified ? "Verified" : "Pending",
         Status: user.status ? "ON" : "OFF",
         "Created At": formatDateTime(user.created_at),
@@ -2257,6 +2314,9 @@ export function DashboardTabs({
         "Total Cab Available Listings": user.availability_count ?? 0,
         "Total Driver Listings": user.driver_requirement_count ?? 0,
         "Total Posts": user.total_posts ?? 0,
+        "Trips Assigned By User": user.trips_assigned_by ?? 0,
+        "Trips Assigned To User": user.trips_assigned_to ?? 0,
+        "Trip Points": user.trip_points ?? 0,
         Rating: user.rating_average != null ? Number(user.rating_average) : "-",
       })),
     });
@@ -2655,7 +2715,7 @@ export function DashboardTabs({
 
       <button
         type="button"
-        className="admin-btn admin-btn-secondary lg:hidden"
+        className="admin-btn admin-btn-secondary lg:hidden min-h-11 w-full justify-center"
         onClick={() => setNavOpen((v) => !v)}
         aria-expanded={navOpen}
         aria-controls="admin-side-nav"
@@ -2678,6 +2738,7 @@ export function DashboardTabs({
           sidebarCollapsed ? "is-collapsed lg:w-[var(--admin-sidebar-w-collapsed)]" : "lg:w-[var(--admin-sidebar-w)]"
         } w-72 ${navOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
+        <button type="button" className="admin-btn admin-btn-secondary mb-3 flex w-full justify-center lg:hidden" onClick={() => setNavOpen(false)} aria-label="Close modules navigation">Close navigation</button>
         <div className="mb-3 flex items-center justify-between gap-2 px-1">
           <div className="admin-sidebar-brand-text min-w-0">
             <p className="admin-eyebrow">Sai Ki Gadi</p>
@@ -2744,7 +2805,7 @@ export function DashboardTabs({
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 w-full flex-1 overflow-x-hidden">
       <PageHeader
         eyebrow="SAI KI GADI • ADMIN"
         title={`${greetingForNow()}, Admin`}
@@ -3292,6 +3353,15 @@ export function DashboardTabs({
         </>
       ) : activeTab === "users" ? (
         <>
+          {membershipHistoryUser ? <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => setMembershipHistoryUser(null)}>
+            <div className="admin-card max-h-[85vh] w-full max-w-3xl overflow-y-auto p-5" role="dialog" aria-modal="true" aria-label="Membership history" onClick={(e)=>e.stopPropagation()}>
+              <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-lg font-semibold">Membership History — {membershipHistoryUser.name}</h2><button type="button" className="admin-btn admin-btn-secondary" onClick={()=>setMembershipHistoryUser(null)}>Close</button></div>
+              {membershipHistoryLoading ? <p>Loading membership history…</p> : membershipHistoryError ? <p className="text-red-600">{membershipHistoryError}</p> : membershipHistory.length===0 ? <p>No historical records available.</p> :
+              <div className="overflow-x-auto"><table className="admin-table"><thead><tr>{["Plan","From","To","Days","Amount","Payment","Reference","Status","Source"].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{membershipHistory.map(h=><tr key={h.id}>
+                <td>{h.membership_type}</td><td>{h.starts_at?formatDateTime(h.starts_at):"—"}</td><td>{h.expires_at?formatDateTime(h.expires_at):"—"}</td><td>{h.duration_days??"—"}</td><td>{h.amount==null?"Unknown":`₹${h.amount}`}</td><td>{h.payment_status}</td><td>{h.payment_reference||"—"}</td><td>{h.status}</td><td>{h.source==="legacy_snapshot"?"Historical snapshot":h.source}</td>
+              </tr>)}</tbody></table></div>}
+            </div>
+          </div> : null}
           <div className="mb-4 flex justify-end">
             <button
               type="button"
@@ -3456,6 +3526,15 @@ export function DashboardTabs({
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
                       Total Posts
                     </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trips Assigned By User</th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trips Assigned To User</th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trip Points</th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Membership Status
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Membership History
+                    </th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
                       Rating
                     </th>
@@ -3465,9 +3544,11 @@ export function DashboardTabs({
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Membership End
                     </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Membership Status</th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Verification
                     </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Edit DOB</th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
                       Status
                     </th>
@@ -3481,7 +3562,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={27}
+                        colSpan={30}
                       >
                         No users found.
                       </td>
@@ -3511,7 +3592,7 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3">
                           <div onClick={(e) => e.stopPropagation()}>
                             <select
-                              defaultValue={user.membership_type ?? "regular"}
+                              defaultValue={user.membership_type === "gold" && user.membership_expires_at && new Date(user.membership_expires_at).getTime()>Date.now() ? "gold" : "regular"}
                               className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-800"
                               onChange={(e) => {
                                 const type = e.target.value;
@@ -3528,7 +3609,13 @@ export function DashboardTabs({
                                     return;
                                   }
 
-                                  updateMembership(user.id, "gold", duration);
+                                  const amountText = prompt("Amount received in ₹ (leave empty if unknown)", "");
+                                  if (amountText === null) return;
+                                  const amount = amountText.trim() ? Number(amountText) : null;
+                                  if (amount !== null && (!Number.isFinite(amount) || amount < 0)) { alert("Invalid amount"); return; }
+                                  const reference = prompt("Payment reference / UTR (optional)", "");
+                                  if (reference === null) return;
+                                  updateMembership(user.id, "gold", duration, amount, reference);
                                 } else {
                                   updateMembership(user.id, "regular");
                                 }
@@ -3543,7 +3630,7 @@ export function DashboardTabs({
                           {formatBirthDateCell(user.date_of_birth)}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatBirthDateCell(user.birth_date)}
+                          {formatBirthDateCell(dobOverrides[user.id] ?? user.birth_date)}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                           {cellDash(user.blood_group)}
@@ -3645,6 +3732,9 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
                           {user.total_posts ?? 0}
                         </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_by ?? 0}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_to ?? 0}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trip_points ?? 0}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
                           {user.rating_average != null
                             ? Number(user.rating_average).toFixed(2)
@@ -3663,6 +3753,12 @@ export function DashboardTabs({
                                 user.membership_expires_at,
                               ).toLocaleDateString()
                             : "-"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
+                          {(() => {
+                            const status = getMembershipStatus(user);
+                            return <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${status === "Active" ? "bg-emerald-100 text-emerald-700" : status === "Expired" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>{status}</span>;
+                          })()}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
                           <span
@@ -3898,6 +3994,19 @@ export function DashboardTabs({
           </div>
 
           <div className="mb-4">
+            {dobEdit ? <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => { if (!dobSaving) setDobEdit(null); }}>
+              <div role="dialog" aria-modal="true" aria-label="Edit date of birth" className="admin-card w-full max-w-md space-y-4 p-5" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-semibold">{dobEdit.date ? "Edit DOB" : "Add DOB"} — {dobEdit.name}</h3>
+                <label className="block text-sm font-medium">Date of birth
+                  <input className="admin-input mt-2" type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={dobEdit.date} onChange={e => setDobEdit(prev => prev ? { ...prev, date: e.target.value } : null)} />
+                </label>
+                {dobError ? <p role="alert" className="text-sm text-red-600">{dobError}</p> : null}
+                <div className="flex justify-end gap-2">
+                  <button type="button" disabled={dobSaving} className="admin-btn admin-btn-secondary" onClick={() => setDobEdit(null)}>Cancel</button>
+                  <button type="button" disabled={dobSaving || !dobEdit.date} className="admin-btn admin-btn-primary" onClick={() => void saveDob()}>{dobSaving ? "Saving..." : "Save DOB"}</button>
+                </div>
+              </div>
+            </div> : null}
             <h2 className="text-lg font-bold text-slate-900">Birthday Date</h2>
             <p className="mt-1 text-sm text-slate-600">
               Search and filter users by signup Date of Birth (
@@ -4028,7 +4137,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={7}
+                        colSpan={8}
                       >
                         No users found.
                       </td>
@@ -4076,6 +4185,13 @@ export function DashboardTabs({
                           >
                             {user.verified ? "Verified" : "Pending"}
                           </span>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <button type="button" className="admin-btn admin-btn-secondary" onClick={(event) => {
+                            event.stopPropagation();
+                            setDobEdit({ id: user.id, name: [user.first_name, user.last_name].filter(Boolean).join(" ") || "User", date: dobOverrides[user.id] ?? user.birth_date ?? "" });
+                            setDobError("");
+                          }}>{(dobOverrides[user.id] ?? user.birth_date) ? "Edit DOB" : "Add DOB"}</button>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-center">
                           <span
@@ -5499,6 +5615,7 @@ export function DashboardTabs({
 
                 setSelectedUserId("");
                 setWinnerDate("");
+                setWinnerText("");
                 setWinnerSlot("");
                 setWinnerImage("");
                 setWinnerMediaType("image");
@@ -5559,7 +5676,7 @@ export function DashboardTabs({
                     winnerUser.map((winner) => (
                       <tr key={winner.id} className="hover:bg-slate-50">
                         <td className="px-4 py-3 font-semibold text-slate-800">
-                          {winner.users?.first_name} {winner.users?.last_name}
+                          <span className="whitespace-pre-wrap">{winner.winner_text || [winner.users?.first_name, winner.users?.last_name].filter(Boolean).join(" ")}</span>
                         </td>
 
                         <td className="px-4 py-3 text-slate-600">
@@ -5619,6 +5736,7 @@ export function DashboardTabs({
                                 setSelectedUserId(winner.user_id ?? "");
 
                                 setWinnerDate(winner.date);
+                                setWinnerText(winner.winner_text ?? [winner.users?.first_name, winner.users?.last_name].filter(Boolean).join(" "));
 
                                 setWinnerSlot(winner.slot);
 
@@ -5733,228 +5851,23 @@ export function DashboardTabs({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">
-                {editingWinnerId ? "Edit Winner" : "Add Winner"}
-              </h2>
-              <button
-                onClick={() => {
-                  setShowWinnerModal(false);
-
-                  setEditingWinnerId(null);
-
-                  setSelectedUserId("");
-                  setWinnerDate("");
-                  setWinnerSlot("");
-                  setWinnerImage("");
-                  setWinnerMediaType("image");
-                }}
-                className="text-slate-500 hover:text-slate-700"
-              >
-                ✕
-              </button>
+              <h2 className="text-xl font-bold">{editingWinnerId ? "Edit Winner" : "Add Winner"}</h2>
+              <button type="button" aria-label="Close" onClick={() => setShowWinnerModal(false)}>✕</button>
             </div>
-
             <div className="space-y-5">
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Media Type
-                </label>
-
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWinnerMediaType("image");
-                      if (!editingWinnerId) {
-                        setWinnerImage("");
-                      }
-                    }}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                      winnerMediaType === "image"
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    Image
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWinnerMediaType("video");
-                      if (!editingWinnerId) {
-                        setWinnerImage("");
-                      }
-                    }}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                      winnerMediaType === "video"
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    Video
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  Select User
-                </label>
-
-                <select
-                  value={selectedUserId}
-                  onChange={(e) => setSelectedUserId(e.target.value)}
-                  // className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500"
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                >
-                  <option value="">Select user</option>
-
-                  {winnerUsers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.fullName} ({user.phone})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  Date
-                </label>
-
-                <input
-                  type="date"
-                  value={winnerDate}
-                  onChange={(e) => setWinnerDate(e.target.value)}
-                  // className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500"
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  Slot
-                </label>
-
-                <input
-                  type="text"
-                  placeholder="Enter slot"
-                  value={winnerSlot}
-                  onChange={(e) => setWinnerSlot(e.target.value)}
-                  // className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500"
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              {/* <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700">
-                    Image URL
-                  </label>
-
-                  <input
-                    type="text"
-                    placeholder="Enter image url"
-                    value={winnerImage}
-                    onChange={(e) => setWinnerImage(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500"
-                  />
-                </div> */}
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  {winnerMediaType === "video"
-                    ? "Upload Video"
-                    : "Upload Image"}
-                </label>
-
-                <input
-                  type="file"
-                  accept={
-                    winnerMediaType === "video"
-                      ? "video/mp4,video/quicktime,video/webm"
-                      : "image/*"
-                  }
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-
-                    if (!file) return;
-
-                    try {
-                      setUploadingImage(true);
-
-                      const sizeError = validateMediaFileSize(
-                        file,
-                        winnerMediaType,
-                      );
-                      if (sizeError) {
-                        throw new Error(sizeError);
-                      }
-
-                      const formData = new FormData();
-
-                      formData.append("file", file);
-                      formData.append("mediaKind", winnerMediaType);
-
-                      const response = await fetch("/api/admin/upload", {
-                        method: "POST",
-                        body: formData,
-                      });
-
-                      const data = await readUploadResponse(response);
-
-                      if (!data.ok || !data.url) {
-                        throw new Error(data.error || "Upload failed");
-                      }
-
-                      setWinnerImage(data.url);
-                    } catch (error) {
-                      console.error("Winner upload error:", error);
-                      window.alert(formatUploadNetworkError(error));
-                    } finally {
-                      setUploadingImage(false);
-                    }
-                  }}
-                  className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-indigo-700"
-                />
-
-                {winnerImage ? (
-                  winnerMediaType === "video" ? (
-                    <video
-                      src={winnerImage}
-                      controls
-                      className="mt-4 aspect-[10/7] w-full rounded-2xl object-cover"
-                    />
-                  ) : (
-                    <img
-                      src={winnerImage}
-                      alt="preview"
-                      className="mt-4 aspect-[10/7] w-full rounded-2xl object-cover"
-                    />
-                  )
-                ) : null}
-              </div>
-
-              <button
-                onClick={createWinner}
-                disabled={
-                  savingWinner ||
-                  uploadingImage ||
-                  !selectedUserId ||
-                  !winnerDate ||
-                  !winnerSlot ||
-                  !winnerImage
-                }
-                className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {uploadingImage
-                  ? winnerMediaType === "video"
-                    ? "Uploading Video..."
-                    : "Uploading Image..."
-                  : savingWinner
-                    ? "Saving..."
-                    : editingWinnerId
-                      ? "Update Winner"
-                      : "Create Winner"}{" "}
+              <label className="block text-sm font-semibold">Date
+                <input type="date" value={winnerDate} onChange={(e) => setWinnerDate(e.target.value)}
+                  className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-3" />
+              </label>
+              <label className="block text-sm font-semibold">Winner Text
+                <textarea rows={8} maxLength={5000} value={winnerText} onChange={(e) => setWinnerText(e.target.value)}
+                  placeholder="Type the winner announcement here. Press Enter for a new line."
+                  className="mt-2 w-full resize-y rounded-lg border border-slate-300 p-3 font-normal whitespace-pre-wrap" />
+              </label>
+              <button type="button" disabled={savingWinner || !winnerDate || !winnerText.trim()}
+                onClick={() => void createWinner()}
+                className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-50">
+                {savingWinner ? "Saving..." : editingWinnerId ? "Update Winner" : "Create Winner"}
               </button>
             </div>
           </div>

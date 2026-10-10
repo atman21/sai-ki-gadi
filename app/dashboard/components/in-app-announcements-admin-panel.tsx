@@ -55,6 +55,15 @@ const secondaryBtnClass =
 const primaryBtnClass =
   "rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60";
 
+/** Browser datetime-local fields need a LOCAL wall time, not a sliced UTC ISO value. */
+function toDateTimeLocal(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(Date.parse(value) + 330 * 60000);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+}
+
 function legacyCustomIntervalHours(
   value: number,
   unit: "minutes" | "hours" | "days",
@@ -1023,38 +1032,69 @@ export function InAppAnnouncementsAdminPanel() {
                     may not trigger on older app versions.
                   </p>
                 ) : null}
-                <label className="block text-sm font-semibold text-slate-700">
-                  Start
-                  <input
-                    type="datetime-local"
-                    className={`${fieldClass} mt-1`}
-                    value={form.starts_at ? form.starts_at.slice(0, 16) : ""}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        starts_at: e.target.value
-                          ? new Date(e.target.value).toISOString()
-                          : null,
-                      }))
+                {(["starts_at", "ends_at"] as const).map((field) => {
+                  const local = toDateTimeLocal(form[field]);
+                  const day = local.slice(0, 10);
+                  const time24 = local.slice(11, 16);
+                  const hour24 = time24 ? Number(time24.slice(0, 2)) : 9;
+                  const minute = time24 ? Number(time24.slice(3, 5)) : 0;
+                  const period = hour24 >= 12 ? "PM" : "AM";
+                  const hour12 = hour24 % 12 || 12;
+                  const updatePart = (nextDay: string, nextHour: number, nextMinute: number, nextPeriod: string) => {
+                    if (!nextDay) {
+                      setForm((prev) => ({ ...prev, [field]: null }));
+                      return;
                     }
-                  />
-                </label>
-                <label className="block text-sm font-semibold text-slate-700">
-                  End
-                  <input
-                    type="datetime-local"
-                    className={`${fieldClass} mt-1`}
-                    value={form.ends_at ? form.ends_at.slice(0, 16) : ""}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        ends_at: e.target.value
-                          ? new Date(e.target.value).toISOString()
-                          : null,
-                      }))
+                    const h = (nextHour % 12) + (nextPeriod === "PM" ? 12 : 0);
+                    const wall = nextDay + "T" + String(h).padStart(2, "0") + ":" + String(nextMinute).padStart(2, "0") + ":00+05:30";
+                    const parsed = new Date(wall);
+                    if (!Number.isNaN(parsed.getTime())) {
+                      setForm((prev) => ({ ...prev, [field]: parsed.toISOString() }));
                     }
-                  />
-                </label>
+                  };
+                  return (
+                    <div key={field} className="space-y-2">
+                      <label className="block text-sm font-semibold text-slate-700">
+                        {field === "starts_at" ? "Start" : "End"} (IST)
+                      </label>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+                        <input type="date" aria-label={field === "starts_at" ? "Start date" : "End date"}
+                          className={fieldClass} value={day}
+                          onChange={(e) => updatePart(e.target.value, hour12, minute, period)} />
+                        <div className="flex items-center gap-1">
+                          <select aria-label="Hour" className={selectClass + " min-w-0 flex-1 px-2"}
+                            value={hour12} onChange={(e) => updatePart(day, Number(e.target.value), minute, period)}>
+                            {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}</option>)}
+                          </select>
+                          <span className="font-bold">:</span>
+                          <select aria-label="Minute" className={selectClass + " min-w-0 flex-1 px-2"}
+                            value={minute} onChange={(e) => updatePart(day, hour12, Number(e.target.value), period)}>
+                            {Array.from({ length: 60 }, (_, i) => i).map((m) => <option key={m} value={m}>{String(m).padStart(2, "0")}</option>)}
+                          </select>
+                          <select aria-label="AM or PM" className={selectClass + " min-w-0 flex-1 px-2"}
+                            value={period} onChange={(e) => updatePart(day, hour12, minute, e.target.value)}>
+                            <option value="AM">AM</option><option value="PM">PM</option>
+                          </select>
+                        </div>
+                      </div>
+                      <details className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <summary className="cursor-pointer text-sm font-medium text-indigo-700">🕒 Open clock picker</summary>
+                        <div className="mx-auto mt-3 grid max-w-[250px] grid-cols-4 gap-2" role="group" aria-label="Choose hour on clock">
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+                            <button key={h} type="button" disabled={!day}
+                              aria-pressed={hour12 === h}
+                              onClick={() => updatePart(day, h, minute, period)}
+                              className={`aspect-square rounded-full border text-sm font-semibold ${hour12 === h ? "border-indigo-700 bg-indigo-600 text-white" : "border-slate-200 bg-white text-slate-800 hover:bg-indigo-50"}`}>
+                              {h}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-center text-xs text-slate-500">Select hour on the clock; choose exact minute and AM/PM above.</p>
+                      </details>
+                      <p className="text-xs text-slate-500">Select date, hour, minute and AM/PM (India time).{!day ? " Select the date first to enable saving the time." : ""}</p>
+                    </div>
+                  );
+                })}
                 <select
                   className={selectClass}
                   value={form.frequency ?? "once_per_user"}
