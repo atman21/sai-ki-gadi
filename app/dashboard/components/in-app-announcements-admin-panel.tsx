@@ -1077,6 +1077,20 @@ export function InAppAnnouncementsAdminPanel() {
                           </select>
                         </div>
                       </div>
+                      <details className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <summary className="cursor-pointer text-sm font-medium text-indigo-700">🕒 Open clock picker</summary>
+                        <div className="mx-auto mt-3 grid max-w-[250px] grid-cols-4 gap-2" role="group" aria-label="Choose hour on clock">
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+                            <button key={h} type="button" disabled={!day}
+                              aria-pressed={hour12 === h}
+                              onClick={() => updatePart(day, h, minute, period)}
+                              className={`aspect-square rounded-full border text-sm font-semibold ${hour12 === h ? "border-indigo-700 bg-indigo-600 text-white" : "border-slate-200 bg-white text-slate-800 hover:bg-indigo-50"}`}>
+                              {h}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-center text-xs text-slate-500">Select hour on the clock; choose exact minute and AM/PM above.</p>
+                      </details>
                       <p className="text-xs text-slate-500">Select date, hour, minute and AM/PM (India time).{!day ? " Select the date first to enable saving the time." : ""}</p>
                     </div>
                   );
