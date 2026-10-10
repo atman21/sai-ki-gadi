@@ -42,42 +42,35 @@ export async function PUT(
     }
 
     if (membership_type) {
-      const allowedMemberships = ["regular", "gold"];
-
-      if (!allowedMemberships.includes(membership_type)) {
-        return NextResponse.json(
-          {
-            error: "Invalid membership type",
-          },
-          {
-            status: 400,
-          },
-        );
+      if (membership_type !== "gold" && membership_type !== "regular") {
+        return NextResponse.json({ error: "Invalid membership type" }, { status: 400 });
       }
-
-      updateData.membership_type = membership_type;
-
-      if (membership_type === "gold") {
-        const days = Number(membership_duration_days || 30);
-
-        const startDate = new Date();
-
-        const endDate = new Date();
-
-        endDate.setDate(endDate.getDate() + days);
-
-        updateData.membership_started_at = startDate.toISOString();
-
-        updateData.membership_expires_at = endDate.toISOString();
-
-        updateData.membership_duration_days = days;
-      } else {
-        updateData.membership_started_at = null;
-
-        updateData.membership_expires_at = null;
-
-        updateData.membership_duration_days = null;
+      const days = membership_type === "gold" ? Number(membership_duration_days) : null;
+      if (membership_type === "gold" && (!Number.isInteger(days) || days! < 1 || days! > 3660)) {
+        return NextResponse.json({ error: "Membership duration must be 1–3660 days" }, { status: 400 });
       }
+      const amount = body.membership_amount === "" || body.membership_amount == null ? null : Number(body.membership_amount);
+      if (amount != null && (!Number.isFinite(amount) || amount < 0)) {
+        return NextResponse.json({ error: "Invalid membership amount" }, { status: 400 });
+      }
+      const paymentStatus = body.membership_payment_status ?? "not_recorded";
+      if (!["not_recorded", "paid", "pending"].includes(paymentStatus)) {
+        return NextResponse.json({ error: "Invalid payment status" }, { status: 400 });
+      }
+      const { error: membershipError } = await supabaseAdmin.rpc("admin_set_user_membership", {
+        p_user_id: id,
+        p_membership_type: membership_type,
+        p_duration_days: days,
+        p_amount: amount,
+        p_payment_reference: typeof body.membership_payment_reference === "string" ? body.membership_payment_reference.trim() || null : null,
+        p_payment_status: paymentStatus,
+      });
+      if (membershipError) return NextResponse.json({ error: membershipError.message }, { status: 500 });
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      if (membership_type) return NextResponse.json({ success: true });
+      return NextResponse.json({ error: "No updates supplied" }, { status: 400 });
     }
 
     const { data, error } = await supabaseAdmin
