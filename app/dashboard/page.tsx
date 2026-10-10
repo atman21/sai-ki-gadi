@@ -44,11 +44,37 @@ type UserRow = {
   availability_count: number;
   driver_requirement_count: number;
   total_posts: number;
+  trip_points: number;
+  trips_assigned_by: number;
+  trips_assigned_to: number;
 };
 
-type UserIdRow = {
-  user_id: string;
-};
+type UserIdRow = { user_id: string };
+
+type TripAssignmentRow = { user_id: string; assigned_id: string | null };
+
+async function fetchAllTripAssignments(table: "requirements" | "exchange_listings", assignedColumn: "assigned_to_user_id" | "exchanged_to_user_id"): Promise<TripAssignmentRow[]> {
+  const result: TripAssignmentRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin.from(table)
+      .select(`user_id,${assignedColumn}`).eq("booked", true)
+      .not(assignedColumn, "is", null).range(from, from + 999);
+    if (error) throw new Error(`Unable to load assignments: ${error.message}`);
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    result.push(...rows.map(row => ({ user_id: String(row.user_id), assigned_id: row[assignedColumn] ? String(row[assignedColumn]) : null })));
+    if (rows.length < 1000) break;
+  }
+  return result;
+}
+
+function countAssignments(rows: TripAssignmentRow[], field: "user_id" | "assigned_id"): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const id = row[field]; if (!id) continue;
+    map.set(id, (map.get(id) ?? 0) + 1);
+  }
+  return map;
+}
 
 function countByUserId(rows: UserIdRow[] | null | undefined): Map<string, number> {
   const counts = new Map<string, number>();
@@ -193,11 +219,13 @@ export default async function DashboardPage() {
     exchangeOwnerIds,
     availabilityOwnerIds,
     driverOwnerIds,
+    assignedRequirements,
+    assignedExchanges,
   ] = await Promise.all([
     supabaseAdmin
       .from("users")
       .select(
-        "id, first_name, last_name, phone, email, membership_type,membership_started_at,membership_expires_at,membership_duration_days, verified, status, verification_status, created_at, welcome_completed, admin_remarks, last_active_at, rating_average, rating_count, blood_group, birth_date, date_of_birth, reference_1_name, reference_1_mobile, reference_2_name, reference_2_mobile, user_roles",
+        "id, first_name, last_name, phone, email, membership_type,membership_started_at,membership_expires_at,membership_duration_days, verified, status, verification_status, created_at, welcome_completed, admin_remarks, last_active_at, rating_average, rating_count, trip_points, blood_group, birth_date, date_of_birth, reference_1_name, reference_1_mobile, reference_2_name, reference_2_mobile, user_roles",
       ),
     (async () => {
       // Prefer current mobile schema columns.
@@ -219,6 +247,8 @@ export default async function DashboardPage() {
     fetchAllUserIds("exchange_listings"),
     fetchAllUserIds("cab_avail_listings"),
     fetchAllUserIds("driver_listings"),
+    fetchAllTripAssignments("requirements", "assigned_to_user_id"),
+    fetchAllTripAssignments("exchange_listings", "exchanged_to_user_id"),
   ]);
   const { data: docs, error: docsError } = docsResult;
 
@@ -236,6 +266,9 @@ export default async function DashboardPage() {
   const availabilityCounts = countByUserId(availabilityOwnerIds);
   const driverCounts = countByUserId(driverOwnerIds);
 
+  const allAssignments = [...assignedRequirements, ...assignedExchanges];
+  const countsByPoster = countAssignments(allAssignments, "user_id");
+  const countsByAssignee = countAssignments(allAssignments, "assigned_id");
   const allUsers: UserRow[] = (users ?? []).map((user) => {
     const requirement_count = requirementCounts.get(user.id) ?? 0;
     const exchange_count = exchangeCounts.get(user.id) ?? 0;
@@ -261,6 +294,9 @@ export default async function DashboardPage() {
       exchange_count,
       availability_count,
       driver_requirement_count,
+      trip_points: Number(user.trip_points ?? 0),
+      trips_assigned_by: countsByPoster.get(user.id) ?? 0,
+      trips_assigned_to: countsByAssignee.get(user.id) ?? 0,
       total_posts:
         requirement_count +
         exchange_count +
