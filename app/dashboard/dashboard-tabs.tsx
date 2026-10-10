@@ -135,6 +135,9 @@ type AppUser = {
   availability_count: number;
   driver_requirement_count: number;
   total_posts: number;
+  trip_points: number;
+  trips_assigned_by: number;
+  trips_assigned_to: number;
 };
 
 const USER_ROLE_LABELS: Record<string, string> = {
@@ -2280,6 +2283,9 @@ export function DashboardTabs({
         "Total Cab Available Listings": user.availability_count ?? 0,
         "Total Driver Listings": user.driver_requirement_count ?? 0,
         "Total Posts": user.total_posts ?? 0,
+        "Trips Assigned By User": user.trips_assigned_by ?? 0,
+        "Trips Assigned To User": user.trips_assigned_to ?? 0,
+        "Trip Points": user.trip_points ?? 0,
         Rating: user.rating_average != null ? Number(user.rating_average) : "-",
       })),
     });
@@ -3480,6 +3486,9 @@ export function DashboardTabs({
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
                       Total Posts
                     </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trips Assigned By User</th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trips Assigned To User</th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trip Points</th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
                       Rating
                     </th>
@@ -3506,7 +3515,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={27}
+                        colSpan={30}
                       >
                         No users found.
                       </td>
@@ -3670,6 +3679,9 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
                           {user.total_posts ?? 0}
                         </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_by ?? 0}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_to ?? 0}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trip_points ?? 0}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
                           {user.rating_average != null
                             ? Number(user.rating_average).toFixed(2)
