@@ -55,6 +55,15 @@ const secondaryBtnClass =
 const primaryBtnClass =
   "rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60";
 
+/** Browser datetime-local fields need a LOCAL wall time, not a sliced UTC ISO value. */
+function toDateTimeLocal(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function legacyCustomIntervalHours(
   value: number,
   unit: "minutes" | "hours" | "days",
@@ -1028,7 +1037,7 @@ export function InAppAnnouncementsAdminPanel() {
                   <input
                     type="datetime-local"
                     className={`${fieldClass} mt-1`}
-                    value={form.starts_at ? form.starts_at.slice(0, 16) : ""}
+                    value={toDateTimeLocal(form.starts_at)}
                     onChange={(e) =>
                       setForm((prev) => ({
                         ...prev,
@@ -1044,7 +1053,7 @@ export function InAppAnnouncementsAdminPanel() {
                   <input
                     type="datetime-local"
                     className={`${fieldClass} mt-1`}
-                    value={form.ends_at ? form.ends_at.slice(0, 16) : ""}
+                    value={toDateTimeLocal(form.ends_at)}
                     onChange={(e) =>
                       setForm((prev) => ({
                         ...prev,
