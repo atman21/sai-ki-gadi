@@ -52,7 +52,12 @@ export async function PUT(request: Request, context: Ctx) {
     const { id } = await context.params;
     const body = await request.json();
 
-    const configError = validateAnnouncementConfig(body);
+    // Validate against the complete stored record, including status-only publish actions.
+    const { data: existing, error: existingError } = await auth.supabase
+      .from("in_app_announcements").select("*").eq("id", id).maybeSingle();
+    if (existingError) return NextResponse.json({ ok: false, error: existingError.message }, { status: 400 });
+    if (!existing) return NextResponse.json({ ok: false, error: "Announcement not found" }, { status: 404 });
+    const configError = validateAnnouncementConfig({ ...existing, ...body });
     if (configError) {
       return NextResponse.json(
         { ok: false, error: configError },
