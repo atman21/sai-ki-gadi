@@ -2655,7 +2655,7 @@ export function DashboardTabs({
 
       <button
         type="button"
-        className="admin-btn admin-btn-secondary lg:hidden"
+        className="admin-btn admin-btn-secondary lg:hidden min-h-11 w-full justify-center"
         onClick={() => setNavOpen((v) => !v)}
         aria-expanded={navOpen}
         aria-controls="admin-side-nav"
@@ -2678,6 +2678,7 @@ export function DashboardTabs({
           sidebarCollapsed ? "is-collapsed lg:w-[var(--admin-sidebar-w-collapsed)]" : "lg:w-[var(--admin-sidebar-w)]"
         } w-72 ${navOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
+        <button type="button" className="admin-btn admin-btn-secondary mb-3 flex w-full justify-center lg:hidden" onClick={() => setNavOpen(false)} aria-label="Close modules navigation">Close navigation</button>
         <div className="mb-3 flex items-center justify-between gap-2 px-1">
           <div className="admin-sidebar-brand-text min-w-0">
             <p className="admin-eyebrow">Sai Ki Gadi</p>
@@ -2744,7 +2745,7 @@ export function DashboardTabs({
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 w-full flex-1 overflow-x-hidden">
       <PageHeader
         eyebrow="SAI KI GADI • ADMIN"
         title={`${greetingForNow()}, Admin`}

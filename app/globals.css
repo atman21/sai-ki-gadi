@@ -597,3 +597,20 @@ html[data-admin-font-size] {
     animation: none;
   }
 }
+
+/* Mobile admin usability: keep tables scrollable without expanding the viewport. */
+@media (max-width: 1023px) {
+  .admin-shell { width: 100%; max-width: 100vw; overflow-x: clip; }
+  .admin-shell .admin-table-wrap { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .admin-shell .admin-table-wrap .overflow-x-auto { max-width: 100%; overscroll-behavior-x: contain; }
+  .admin-shell .admin-table-wrap table { min-width: 640px; }
+  .admin-shell .admin-table-wrap th,
+  .admin-shell .admin-table-wrap td { padding: 0.65rem 0.75rem; }
+  .admin-shell button,
+  .admin-shell select,
+  .admin-shell input { touch-action: manipulation; }
+}
+@media (max-width: 639px) {
+  .admin-shell .admin-page-title { line-height: 1.35; overflow-wrap: anywhere; }
+  .admin-shell .admin-toast { max-width: calc(100vw - 2rem); }
+}
