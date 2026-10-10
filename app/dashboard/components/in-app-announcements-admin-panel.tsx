@@ -58,10 +58,10 @@ const primaryBtnClass =
 /** Browser datetime-local fields need a LOCAL wall time, not a sliced UTC ISO value. */
 function toDateTimeLocal(value: string | null | undefined): string {
   if (!value) return "";
-  const date = new Date(value);
+  const date = new Date(Date.parse(value) + 330 * 60000);
   if (Number.isNaN(date.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
 }
 
 function legacyCustomIntervalHours(
@@ -1042,7 +1042,7 @@ export function InAppAnnouncementsAdminPanel() {
                       setForm((prev) => ({
                         ...prev,
                         starts_at: e.target.value
-                          ? new Date(e.target.value).toISOString()
+                          ? new Date(e.target.value + ":00+05:30").toISOString()
                           : null,
                       }))
                     }
@@ -1058,7 +1058,7 @@ export function InAppAnnouncementsAdminPanel() {
                       setForm((prev) => ({
                         ...prev,
                         ends_at: e.target.value
-                          ? new Date(e.target.value).toISOString()
+                          ? new Date(e.target.value + ":00+05:30").toISOString()
                           : null,
                       }))
                     }
