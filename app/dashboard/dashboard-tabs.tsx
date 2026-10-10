@@ -90,6 +90,7 @@ type WinnersUser = {
   date: string;
   slot: string;
   image: string | null;
+  winner_text?: string | null;
   media_type?: WinnerMediaType | null;
   created_at: string;
   users: {
@@ -643,6 +644,7 @@ export function DashboardTabs({
   const [selectedUserId, setSelectedUserId] = useState("");
 
   const [winnerDate, setWinnerDate] = useState("");
+  const [winnerText, setWinnerText] = useState("");
 
   const [winnerSlot, setWinnerSlot] = useState("");
 
@@ -1991,11 +1993,8 @@ export function DashboardTabs({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          user_id: selectedUserId,
           date: winnerDate,
-          slot: winnerSlot,
-          image: winnerImage,
-          media_type: winnerMediaType,
+          winner_text: winnerText,
         }),
       });
 
@@ -2025,6 +2024,7 @@ export function DashboardTabs({
 
       setSelectedUserId("");
       setWinnerDate("");
+      setWinnerText("");
       setWinnerSlot("");
       setWinnerImage("");
       setWinnerMediaType("image");
@@ -5556,6 +5556,7 @@ export function DashboardTabs({
 
                 setSelectedUserId("");
                 setWinnerDate("");
+                setWinnerText("");
                 setWinnerSlot("");
                 setWinnerImage("");
                 setWinnerMediaType("image");
@@ -5616,7 +5617,7 @@ export function DashboardTabs({
                     winnerUser.map((winner) => (
                       <tr key={winner.id} className="hover:bg-slate-50">
                         <td className="px-4 py-3 font-semibold text-slate-800">
-                          {winner.users?.first_name} {winner.users?.last_name}
+                          <span className="whitespace-pre-wrap">{winner.winner_text || [winner.users?.first_name, winner.users?.last_name].filter(Boolean).join(" ")}</span>
                         </td>
 
                         <td className="px-4 py-3 text-slate-600">
@@ -5676,6 +5677,7 @@ export function DashboardTabs({
                                 setSelectedUserId(winner.user_id ?? "");
 
                                 setWinnerDate(winner.date);
+                                setWinnerText(winner.winner_text ?? [winner.users?.first_name, winner.users?.last_name].filter(Boolean).join(" "));
 
                                 setWinnerSlot(winner.slot);
 
@@ -5790,228 +5792,23 @@ export function DashboardTabs({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">
-                {editingWinnerId ? "Edit Winner" : "Add Winner"}
-              </h2>
-              <button
-                onClick={() => {
-                  setShowWinnerModal(false);
-
-                  setEditingWinnerId(null);
-
-                  setSelectedUserId("");
-                  setWinnerDate("");
-                  setWinnerSlot("");
-                  setWinnerImage("");
-                  setWinnerMediaType("image");
-                }}
-                className="text-slate-500 hover:text-slate-700"
-              >
-                ✕
-              </button>
+              <h2 className="text-xl font-bold">{editingWinnerId ? "Edit Winner" : "Add Winner"}</h2>
+              <button type="button" aria-label="Close" onClick={() => setShowWinnerModal(false)}>✕</button>
             </div>
-
             <div className="space-y-5">
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Media Type
-                </label>
-
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWinnerMediaType("image");
-                      if (!editingWinnerId) {
-                        setWinnerImage("");
-                      }
-                    }}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                      winnerMediaType === "image"
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    Image
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWinnerMediaType("video");
-                      if (!editingWinnerId) {
-                        setWinnerImage("");
-                      }
-                    }}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                      winnerMediaType === "video"
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    Video
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  Select User
-                </label>
-
-                <select
-                  value={selectedUserId}
-                  onChange={(e) => setSelectedUserId(e.target.value)}
-                  // className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500"
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                >
-                  <option value="">Select user</option>
-
-                  {winnerUsers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.fullName} ({user.phone})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  Date
-                </label>
-
-                <input
-                  type="date"
-                  value={winnerDate}
-                  onChange={(e) => setWinnerDate(e.target.value)}
-                  // className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500"
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  Slot
-                </label>
-
-                <input
-                  type="text"
-                  placeholder="Enter slot"
-                  value={winnerSlot}
-                  onChange={(e) => setWinnerSlot(e.target.value)}
-                  // className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500"
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              {/* <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700">
-                    Image URL
-                  </label>
-
-                  <input
-                    type="text"
-                    placeholder="Enter image url"
-                    value={winnerImage}
-                    onChange={(e) => setWinnerImage(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-indigo-500"
-                  />
-                </div> */}
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  {winnerMediaType === "video"
-                    ? "Upload Video"
-                    : "Upload Image"}
-                </label>
-
-                <input
-                  type="file"
-                  accept={
-                    winnerMediaType === "video"
-                      ? "video/mp4,video/quicktime,video/webm"
-                      : "image/*"
-                  }
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-
-                    if (!file) return;
-
-                    try {
-                      setUploadingImage(true);
-
-                      const sizeError = validateMediaFileSize(
-                        file,
-                        winnerMediaType,
-                      );
-                      if (sizeError) {
-                        throw new Error(sizeError);
-                      }
-
-                      const formData = new FormData();
-
-                      formData.append("file", file);
-                      formData.append("mediaKind", winnerMediaType);
-
-                      const response = await fetch("/api/admin/upload", {
-                        method: "POST",
-                        body: formData,
-                      });
-
-                      const data = await readUploadResponse(response);
-
-                      if (!data.ok || !data.url) {
-                        throw new Error(data.error || "Upload failed");
-                      }
-
-                      setWinnerImage(data.url);
-                    } catch (error) {
-                      console.error("Winner upload error:", error);
-                      window.alert(formatUploadNetworkError(error));
-                    } finally {
-                      setUploadingImage(false);
-                    }
-                  }}
-                  className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-indigo-700"
-                />
-
-                {winnerImage ? (
-                  winnerMediaType === "video" ? (
-                    <video
-                      src={winnerImage}
-                      controls
-                      className="mt-4 aspect-[10/7] w-full rounded-2xl object-cover"
-                    />
-                  ) : (
-                    <img
-                      src={winnerImage}
-                      alt="preview"
-                      className="mt-4 aspect-[10/7] w-full rounded-2xl object-cover"
-                    />
-                  )
-                ) : null}
-              </div>
-
-              <button
-                onClick={createWinner}
-                disabled={
-                  savingWinner ||
-                  uploadingImage ||
-                  !selectedUserId ||
-                  !winnerDate ||
-                  !winnerSlot ||
-                  !winnerImage
-                }
-                className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {uploadingImage
-                  ? winnerMediaType === "video"
-                    ? "Uploading Video..."
-                    : "Uploading Image..."
-                  : savingWinner
-                    ? "Saving..."
-                    : editingWinnerId
-                      ? "Update Winner"
-                      : "Create Winner"}{" "}
+              <label className="block text-sm font-semibold">Date
+                <input type="date" value={winnerDate} onChange={(e) => setWinnerDate(e.target.value)}
+                  className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-3" />
+              </label>
+              <label className="block text-sm font-semibold">Winner Text
+                <textarea rows={8} maxLength={5000} value={winnerText} onChange={(e) => setWinnerText(e.target.value)}
+                  placeholder="Type the winner announcement here. Press Enter for a new line."
+                  className="mt-2 w-full resize-y rounded-lg border border-slate-300 p-3 font-normal whitespace-pre-wrap" />
+              </label>
+              <button type="button" disabled={savingWinner || !winnerDate || !winnerText.trim()}
+                onClick={() => void createWinner()}
+                className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-50">
+                {savingWinner ? "Saving..." : editingWinnerId ? "Update Winner" : "Create Winner"}
               </button>
             </div>
           </div>
