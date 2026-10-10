@@ -141,6 +141,16 @@ type AppUser = {
   trips_assigned_to: number;
 };
 
+/** Membership state is separate from user account ON/OFF status. */
+function getMembershipStatus(user: Pick<UserRow, "membership_type" | "membership_started_at" | "membership_expires_at">, now = Date.now()): "Active" | "Expired" | "Not Subscribed" {
+  if (!user.membership_type || user.membership_type === "regular") return "Not Subscribed";
+  const expiry = user.membership_expires_at ? Date.parse(user.membership_expires_at) : NaN;
+  const start = user.membership_started_at ? Date.parse(user.membership_started_at) : NaN;
+  if (!Number.isFinite(expiry)) return "Expired";
+  if (Number.isFinite(start) && start > now) return "Expired";
+  return expiry > now ? "Active" : "Expired";
+}
+
 const USER_ROLE_LABELS: Record<string, string> = {
   car_owner: "Car Owner",
   driver: "Driver",
@@ -2292,6 +2302,7 @@ export function DashboardTabs({
         "User Roles": formatUserRolesCell(user.user_roles),
         "Membership Start": formatDateTime(user.membership_started_at),
         "Membership End": formatDateTime(user.membership_expires_at),
+        "Membership Status": getMembershipStatus(user),
         Verification: user.verified ? "Verified" : "Pending",
         Status: user.status ? "ON" : "OFF",
         "Created At": formatDateTime(user.created_at),
@@ -3533,6 +3544,7 @@ export function DashboardTabs({
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Membership End
                     </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Membership Status</th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Verification
                     </th>
@@ -3741,6 +3753,12 @@ export function DashboardTabs({
                                 user.membership_expires_at,
                               ).toLocaleDateString()
                             : "-"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
+                          {(() => {
+                            const status = getMembershipStatus(user);
+                            return <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${status === "Active" ? "bg-emerald-100 text-emerald-700" : status === "Expired" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>{status}</span>;
+                          })()}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
                           <span
