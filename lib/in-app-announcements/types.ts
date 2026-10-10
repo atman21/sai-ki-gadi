@@ -218,6 +218,10 @@ export function audienceLabel(audience: AudienceType): string {
 export function validateAnnouncementConfig(input: {
   is_mandatory?: boolean;
   record_acceptance?: boolean;
+  internal_name?: string;
+  status?: string;
+  starts_at?: string | null;
+  ends_at?: string | null;
   show_close?: boolean;
   outside_tap_closes?: boolean;
   back_button_closes?: boolean;
@@ -231,6 +235,23 @@ export function validateAnnouncementConfig(input: {
   audio_enabled?: boolean;
   audio_url?: string | null;
 }): string | null {
+  const start = input.starts_at ? Date.parse(input.starts_at) : null;
+  const end = input.ends_at ? Date.parse(input.ends_at) : null;
+  if ((input.starts_at && !Number.isFinite(start)) || (input.ends_at && !Number.isFinite(end))) {
+    return "Please enter valid Start and End date/time values.";
+  }
+  if (start !== null && end !== null && end <= start) {
+    return "End date/time must be later than Start date/time.";
+  }
+  const isWinner = /(?:lucky\\s*draw|daily\\s*winner|winner)/i.test(input.internal_name ?? "");
+  if (isWinner && ["active", "scheduled"].includes(input.status ?? "")) {
+    if (start === null || end === null) {
+      return "Lucky Draw winner notifications require both Start and End date/time.";
+    }
+    if (end <= Date.now()) {
+      return "Cannot publish an expired Lucky Draw winner notification.";
+    }
+  }
   const mandatory = Boolean(input.is_mandatory);
   if (mandatory) {
     if (input.show_close) {
