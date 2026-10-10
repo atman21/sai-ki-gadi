@@ -583,6 +583,28 @@ export function DashboardTabs({
   const [userToDate, setUserToDate] = useState("");
   const [userSort, setUserSort] = useState<UserSortKey>("created_newest");
   const [birthdaySearch, setBirthdaySearch] = useState("");
+  const [dobEdit, setDobEdit] = useState<{ id: string; name: string; date: string } | null>(null);
+  const [dobSaving, setDobSaving] = useState(false);
+  const [dobError, setDobError] = useState("");
+  const [dobOverrides, setDobOverrides] = useState<Record<string, string>>({});
+  async function saveDob() {
+    if (!dobEdit || dobSaving) return;
+    setDobSaving(true);
+    setDobError("");
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(dobEdit.id)}/birth-date`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ birth_date: dobEdit.date }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error ?? "Unable to update DOB");
+      setDobOverrides(prev => ({ ...prev, [dobEdit.id]: result.user.birth_date }));
+      setDobEdit(null);
+      router.refresh();
+    } catch (error) {
+      setDobError(error instanceof Error ? error.message : "Unable to update DOB");
+    } finally { setDobSaving(false); }
+  }
   const [birthdayExactDate, setBirthdayExactDate] = useState("");
   const [birthdayFromDate, setBirthdayFromDate] = useState("");
   const [birthdayToDate, setBirthdayToDate] = useState("");
@@ -1364,7 +1386,7 @@ export function DashboardTabs({
 
       if (!matchesSearch) return false;
 
-      const dob = parseBirthDateValue(user.birth_date);
+      const dob = parseBirthDateValue(dobOverrides[user.id] ?? user.birth_date);
 
       if (birthdayPreset === "not_set") {
         return dob == null;
@@ -1414,8 +1436,8 @@ export function DashboardTabs({
     };
 
     return [...filtered].sort((a, b) => {
-      const aTime = dobTime(a.birth_date);
-      const bTime = dobTime(b.birth_date);
+      const aTime = dobTime(dobOverrides[a.id] ?? a.birth_date);
+      const bTime = dobTime(dobOverrides[b.id] ?? b.birth_date);
 
       // Missing DOB last for both sort directions
       if (aTime == null && bTime == null) return 0;
@@ -1432,6 +1454,7 @@ export function DashboardTabs({
     birthdayToDate,
     birthdayPreset,
     birthdaySort,
+    dobOverrides,
   ]);
 
   const birthdayTotalPages = Math.max(
@@ -3469,6 +3492,7 @@ export function DashboardTabs({
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Verification
                     </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Edit DOB</th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
                       Status
                     </th>
@@ -3544,7 +3568,7 @@ export function DashboardTabs({
                           {formatBirthDateCell(user.date_of_birth)}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatBirthDateCell(user.birth_date)}
+                          {formatBirthDateCell(dobOverrides[user.id] ?? user.birth_date)}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                           {cellDash(user.blood_group)}
@@ -3899,6 +3923,19 @@ export function DashboardTabs({
           </div>
 
           <div className="mb-4">
+            {dobEdit ? <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => { if (!dobSaving) setDobEdit(null); }}>
+              <div role="dialog" aria-modal="true" aria-label="Edit date of birth" className="admin-card w-full max-w-md space-y-4 p-5" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-semibold">{dobEdit.date ? "Edit DOB" : "Add DOB"} — {dobEdit.name}</h3>
+                <label className="block text-sm font-medium">Date of birth
+                  <input className="admin-input mt-2" type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={dobEdit.date} onChange={e => setDobEdit(prev => prev ? { ...prev, date: e.target.value } : null)} />
+                </label>
+                {dobError ? <p role="alert" className="text-sm text-red-600">{dobError}</p> : null}
+                <div className="flex justify-end gap-2">
+                  <button type="button" disabled={dobSaving} className="admin-btn admin-btn-secondary" onClick={() => setDobEdit(null)}>Cancel</button>
+                  <button type="button" disabled={dobSaving || !dobEdit.date} className="admin-btn admin-btn-primary" onClick={() => void saveDob()}>{dobSaving ? "Saving..." : "Save DOB"}</button>
+                </div>
+              </div>
+            </div> : null}
             <h2 className="text-lg font-bold text-slate-900">Birthday Date</h2>
             <p className="mt-1 text-sm text-slate-600">
               Search and filter users by signup Date of Birth (
@@ -4029,7 +4066,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={7}
+                        colSpan={8}
                       >
                         No users found.
                       </td>
@@ -4077,6 +4114,13 @@ export function DashboardTabs({
                           >
                             {user.verified ? "Verified" : "Pending"}
                           </span>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <button type="button" className="admin-btn admin-btn-secondary" onClick={(event) => {
+                            event.stopPropagation();
+                            setDobEdit({ id: user.id, name: [user.first_name, user.last_name].filter(Boolean).join(" ") || "User", date: dobOverrides[user.id] ?? user.birth_date ?? "" });
+                            setDobError("");
+                          }}>{(dobOverrides[user.id] ?? user.birth_date) ? "Edit DOB" : "Add DOB"}</button>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-center">
                           <span
