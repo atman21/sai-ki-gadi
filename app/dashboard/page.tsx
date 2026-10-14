@@ -54,16 +54,42 @@ type UserIdRow = { user_id: string };
 type TripAssignmentRow = { user_id: string; assigned_id: string | null };
 
 async function fetchAllTripAssignments(table: "requirements" | "exchange_listings", assignedColumn: "assigned_to_user_id" | "exchanged_to_user_id"): Promise<TripAssignmentRow[]> {
+  const pageSize = 1000;
   const result: TripAssignmentRow[] = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabaseAdmin.from(table)
-      .select(`user_id,${assignedColumn}`).eq("booked", true)
-      .not(assignedColumn, "is", null).range(from, from + 999);
+  // Cap pages so a runaway loop cannot hang dashboard bootstrap; 1000*500 = 500k rows.
+  const maxPages = 500;
+  let totalCount: number | null = null;
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error, count } = await supabaseAdmin
+      .from(table)
+      .select(
+        `user_id,${assignedColumn}`,
+        page === 0 ? { count: "exact" } : undefined,
+      )
+      .eq("booked", true)
+      .not(assignedColumn, "is", null)
+      .order("id", { ascending: true })
+      .range(from, to);
     if (error) throw new Error(`Unable to load assignments: ${error.message}`);
+    if (page === 0 && typeof count === "number") {
+      totalCount = count;
+    }
     const rows = (data ?? []) as unknown as Record<string, unknown>[];
-    result.push(...rows.map(row => ({ user_id: String(row.user_id), assigned_id: row[assignedColumn] ? String(row[assignedColumn]) : null })));
-    if (rows.length < 1000) break;
+    result.push(
+      ...rows.map((row) => ({
+        user_id: String(row.user_id),
+        assigned_id: row[assignedColumn] ? String(row[assignedColumn]) : null,
+      })),
+    );
+
+    // Exact pageSize means more pages may exist (including a final full page).
+    if (rows.length < pageSize) break;
+    if (totalCount != null && result.length >= totalCount) break;
   }
+
   return result;
 }
 
@@ -87,24 +113,32 @@ function countByUserId(rows: UserIdRow[] | null | undefined): Map<string, number
 
 async function fetchAllUserIds(table: string): Promise<UserIdRow[]> {
   const pageSize = 1000;
-  let from = 0;
+  const maxPages = 500;
   const all: UserIdRow[] = [];
+  let totalCount: number | null = null;
 
-  while (true) {
-    const { data, error } = await supabaseAdmin
+  for (let page = 0; page < maxPages; page += 1) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error, count } = await supabaseAdmin
       .from(table)
-      .select("user_id")
-      .range(from, from + pageSize - 1);
+      .select("user_id", page === 0 ? { count: "exact" } : undefined)
+      .order("id", { ascending: true })
+      .range(from, to);
 
     if (error) {
       throw new Error(`Unable to fetch ${table} owners: ${error.message}`);
+    }
+
+    if (page === 0 && typeof count === "number") {
+      totalCount = count;
     }
 
     const rows = (data ?? []) as UserIdRow[];
     all.push(...rows);
 
     if (rows.length < pageSize) break;
-    from += pageSize;
+    if (totalCount != null && all.length >= totalCount) break;
   }
 
   return all;

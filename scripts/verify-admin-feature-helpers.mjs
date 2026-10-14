@@ -37,6 +37,33 @@ function countAssignments(rows, field) {
   return map;
 }
 
+const PREFIX = "admin-wallet:";
+
+function buildWalletIdempotencyKey(userId, opaque) {
+  const id = userId.trim();
+  const suffix =
+    (opaque && opaque.trim()) ||
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${PREFIX}${id}:${suffix}`;
+}
+
+function scopeWalletIdempotencyKey(userId, clientKey) {
+  const id = userId.trim();
+  const raw = clientKey.trim();
+  if (!id || !raw || raw.length > 200) return null;
+
+  const expectedPrefix = `${PREFIX}${id}:`;
+  if (raw.startsWith(expectedPrefix) && raw.length > expectedPrefix.length) {
+    return raw.slice(0, 200);
+  }
+
+  const opaque = raw.startsWith(PREFIX)
+    ? raw.slice(PREFIX.length).replace(/^[^:]+:/, "") || raw
+    : raw;
+  const scoped = buildWalletIdempotencyKey(id, opaque);
+  return scoped.length <= 200 ? scoped : scoped.slice(0, 200);
+}
+
 // Wallet amount validation
 assert.equal(normalizeWalletAmount(100), 100);
 assert.equal(normalizeWalletAmount("12.50"), 12.5);
@@ -88,5 +115,24 @@ const byAssignee = countAssignments(rows, "assigned_id");
 assert.equal(byPoster.get("poster-a"), 2);
 assert.equal(byAssignee.get("assignee-b"), 2);
 assert.equal(byAssignee.get("poster-a"), undefined);
+
+// Wallet idempotency must be user-scoped (cannot reuse another user's key)
+const userA = "11111111-1111-1111-1111-111111111111";
+const userB = "22222222-2222-2222-2222-222222222222";
+const keyA = buildWalletIdempotencyKey(userA, "same-opaque");
+const reboundFromA = scopeWalletIdempotencyKey(userB, keyA);
+assert.ok(keyA.startsWith(`admin-wallet:${userA}:`));
+assert.ok(reboundFromA.startsWith(`admin-wallet:${userB}:`));
+assert.notEqual(keyA, reboundFromA);
+assert.equal(
+  scopeWalletIdempotencyKey(userA, keyA),
+  keyA,
+);
+assert.equal(scopeWalletIdempotencyKey(userA, ""), null);
+assert.equal(scopeWalletIdempotencyKey("", "x"), null);
+
+// Unscoped client key is rebound to the path user
+const scoped = scopeWalletIdempotencyKey(userA, "admin-wallet-legacy-uuid");
+assert.ok(scoped.startsWith(`admin-wallet:${userA}:`));
 
 console.log("verify-admin-feature-helpers: OK");
