@@ -1,10 +1,12 @@
-// @ts-nocheck
 /**
  * Birthday FCM blast — SEPARATE from Lucky Draw `send-lucky-draw-notification`
  * and booking `send-fcm-all`. Self-contained for Dashboard paste-deploy.
  * Channel/sound: same as Winner (merigadi-sound-v5 / saikigadi_notification_new).
  * Does NOT modify Winner or booking notification logic.
  * Does NOT touch in-app BirthdayWishPopup.
+ *
+ * Runtime: Supabase Edge (Deno). Ambient types live in ./deno-env.d.ts so this
+ * file type-checks under the repo ESLint/TS toolchain without @ts-nocheck.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -322,9 +324,11 @@ async function claimBirthday(
     return { claimed: false };
   }
 
-  const createdAt = existing.created_at
-    ? new Date(existing.created_at).getTime()
-    : 0;
+  const createdAtRaw = existing.created_at;
+  const createdAt =
+    typeof createdAtRaw === "string" || typeof createdAtRaw === "number"
+      ? new Date(createdAtRaw).getTime()
+      : 0;
   const isStalePending =
     existing.status === "pending" &&
     Number.isFinite(createdAt) &&
@@ -398,9 +402,15 @@ async function sendToAllDevices(
 
   if (error) throw error;
 
-  const tokens = (rows ?? [])
-    .map((r) => r.expo_push_token as string)
-    .filter((t) => typeof t === "string" && t.length > 0 && isFcmNativeToken(t));
+  const tokenRows: Array<Record<string, unknown>> = Array.isArray(rows)
+    ? rows
+    : [];
+  const tokens = tokenRows
+    .map((r) => r.expo_push_token)
+    .filter(
+      (t): t is string =>
+        typeof t === "string" && t.length > 0 && isFcmNativeToken(t),
+    );
 
   const uniqueTokens = [...new Set(tokens)];
   console.log(`${LOG} Sending FCM`, { deviceCount: uniqueTokens.length });
@@ -410,10 +420,11 @@ async function sendToAllDevices(
   }
 
   const accessToken = await getFirebaseAccessToken();
+  const firebaseProjectId = projectId;
 
   const results = await Promise.all(
     uniqueTokens.map((token) =>
-      sendFcmToToken(token, title, body, accessToken, projectId),
+      sendFcmToToken(token, title, body, accessToken, firebaseProjectId),
     ),
   );
 

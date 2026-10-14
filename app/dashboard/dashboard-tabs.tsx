@@ -1,6 +1,11 @@
 "use client";
 
-import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
+import {
+  DragDropContext,
+  Draggable,
+  Droppable,
+  type DropResult,
+} from "@hello-pangea/dnd";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -23,11 +28,14 @@ import { openAdminCommandPalette } from "@/components/admin/command-palette";
 
 import { AboutUsAdminPanel } from "./components/about-us-admin-panel";
 import { InAppAnnouncementsAdminPanel } from "./components/in-app-announcements-admin-panel";
+import { MembershipManagementPanel } from "./components/membership-management-panel";
+import { WalletManagementPanel } from "./components/wallet-management-panel";
 import { AdminNavIcon } from "./admin-nav-icons";
 import { FareOverrideRequestsPanel } from "@/components/admin/fare-override-requests-panel";
 import { ActiveFareOverridesPanel } from "@/components/admin/active-fare-overrides-panel";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
 
 type MembershipCounts = {
   regular: number;
@@ -142,13 +150,11 @@ type AppUser = {
 };
 
 /** Membership state is separate from user account ON/OFF status. */
-function getMembershipStatus(user: Pick<UserRow, "membership_type" | "membership_started_at" | "membership_expires_at">, now = Date.now()): "Active" | "Expired" | "Not Subscribed" {
-  if (!user.membership_type || user.membership_type === "regular") return "Not Subscribed";
-  const expiry = user.membership_expires_at ? Date.parse(user.membership_expires_at) : NaN;
-  const start = user.membership_started_at ? Date.parse(user.membership_started_at) : NaN;
-  if (!Number.isFinite(expiry)) return "Expired";
-  if (Number.isFinite(start) && start > now) return "Expired";
-  return expiry > now ? "Active" : "Expired";
+function getMembershipStatus(
+  user: Pick<AppUser, "membership_type" | "membership_started_at" | "membership_expires_at">,
+  now = Date.now(),
+) {
+  return getMembershipLifecycleStatus(user, now);
 }
 
 const USER_ROLE_LABELS: Record<string, string> = {
@@ -413,7 +419,9 @@ type TabKey =
   | "fare-override-requests"
   | "active-fare-overrides"
   | "about-us"
-  | "in-app-popups";
+  | "in-app-popups"
+  | "wallet-management"
+  | "membership-management";
 
 type NavTabItem = {
   key: TabKey;
@@ -538,7 +546,36 @@ export function DashboardTabs({
 }: DashboardTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const initialTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    if (
+      initialTab === "overview" ||
+      initialTab === "pending" ||
+      initialTab === "rejected-partial" ||
+      initialTab === "not-started" ||
+      initialTab === "winners" ||
+      initialTab === "cities" ||
+      initialTab === "sliders" ||
+      initialTab === "users" ||
+      initialTab === "birthday-date" ||
+      initialTab === "requirements" ||
+      initialTab === "exchanges" ||
+      initialTab === "fraud-reports" ||
+      initialTab === "priority-settings" ||
+      initialTab === "profile-changes" ||
+      initialTab === "car-verification" ||
+      initialTab === "minimum-fares" ||
+      initialTab === "fare-override-requests" ||
+      initialTab === "active-fare-overrides" ||
+      initialTab === "about-us" ||
+      initialTab === "in-app-popups" ||
+      initialTab === "wallet-management" ||
+      initialTab === "membership-management"
+    ) {
+      return initialTab;
+    }
+    return "overview";
+  });
   const [navOpen, setNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [profileChangeFilter, setProfileChangeFilter] = useState<
@@ -1926,6 +1963,14 @@ export function DashboardTabs({
         items: [
           { key: "priority-settings" as TabKey, label: "Priority Timeline" },
           {
+            key: "wallet-management" as TabKey,
+            label: "Wallet Management",
+          },
+          {
+            key: "membership-management" as TabKey,
+            label: "Membership Management",
+          },
+          {
             key: "minimum-fares" as TabKey,
             label: "Minimum Fare",
             count: liveFareStats?.minimumFareRules ?? routeMinimumFares.length,
@@ -2153,7 +2198,7 @@ export function DashboardTabs({
     }
   };
 
-  const onSliderDragEnd = async (result: any) => {
+  const onSliderDragEnd = async (result: DropResult) => {
     if (!result.destination) return;
 
     const items = Array.from(sliderList);
@@ -5512,6 +5557,10 @@ export function DashboardTabs({
         <ActiveFareOverridesPanel />
       ) : activeTab === "about-us" ? (
         <AboutUsAdminPanel />
+      ) : activeTab === "wallet-management" ? (
+        <WalletManagementPanel />
+      ) : activeTab === "membership-management" ? (
+        <MembershipManagementPanel />
       ) : activeTab === "in-app-popups" ? (
         <InAppAnnouncementsAdminPanel />
       ) : (

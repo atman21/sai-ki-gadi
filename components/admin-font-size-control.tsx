@@ -12,24 +12,26 @@ import {
 } from "@/lib/admin-font-size";
 
 export function AdminFontSizeControl() {
-  // SSR + first paint use "normal"; sync from localStorage after mount.
-  // Actual page font is applied earlier by the dashboard bootstrap script.
-  const [fontSize, setFontSize] = useState<AdminFontSize>("normal");
+  // Lazy init from localStorage avoids a sync setState-in-effect cascade.
+  // SSR and the first server render still use "normal"; the client hydrate
+  // path reads storage once when the state initializer runs.
+  const [fontSize, setFontSize] = useState<AdminFontSize>(() => {
+    if (typeof window === "undefined") return "normal";
+    return readStoredAdminFontSize();
+  });
 
   useEffect(() => {
-    const stored = readStoredAdminFontSize();
-    setFontSize(stored);
-    applyAdminFontSize(stored);
+    // Keep DOM attribute/scale in sync with the selected size, and clear
+    // admin scaling when leaving dashboard routes.
+    applyAdminFontSize(fontSize);
 
     return () => {
-      // Keep admin scaling scoped to /dashboard routes only.
       clearAdminFontSize();
     };
-  }, []);
+  }, [fontSize]);
 
   const handleSelect = (next: AdminFontSize) => {
     setFontSize(next);
-    applyAdminFontSize(next);
     persistAdminFontSize(next);
   };
 
