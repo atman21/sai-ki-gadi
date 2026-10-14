@@ -3589,13 +3589,11 @@ export function DashboardTabs({
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Membership End
                     </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Membership Status</th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Verification
                     </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Edit DOB</th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Status
+                      Account Status
                     </th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
                       Actions
@@ -3607,7 +3605,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={30}
+                        colSpan={32}
                       >
                         No users found.
                       </td>
@@ -3780,6 +3778,36 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_by ?? 0}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_to ?? 0}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trip_points ?? 0}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
+                          {(() => {
+                            const status = getMembershipStatus(user);
+                            return (
+                              <span
+                                className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                                  status === "Active"
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : status === "Expired"
+                                      ? "bg-red-100 text-red-700"
+                                      : "bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                {status}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn-secondary"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void showMembershipHistory(user);
+                            }}
+                          >
+                            View
+                          </button>
+                        </td>
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
                           {user.rating_average != null
                             ? Number(user.rating_average).toFixed(2)
@@ -3799,12 +3827,6 @@ export function DashboardTabs({
                               ).toLocaleDateString()
                             : "-"}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center">
-                          {(() => {
-                            const status = getMembershipStatus(user);
-                            return <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${status === "Active" ? "bg-emerald-100 text-emerald-700" : status === "Expired" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>{status}</span>;
-                          })()}
-                        </td>
                         <td className="whitespace-nowrap px-4 py-3">
                           <span
                             className={`rounded-full px-3 py-1 text-xs font-semibold ${
@@ -3816,7 +3838,7 @@ export function DashboardTabs({
                             {user.verified ? "Verified" : "Pending"}
                           </span>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3">
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
                           {updatingUserId === user.id ? (
                             <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
                               <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
@@ -4172,8 +4194,11 @@ export function DashboardTabs({
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Verification
                     </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Edit DOB
+                    </th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Status
+                      Account Status
                     </th>
                   </tr>
                 </thead>
@@ -5563,7 +5588,7 @@ export function DashboardTabs({
         <MembershipManagementPanel />
       ) : activeTab === "in-app-popups" ? (
         <InAppAnnouncementsAdminPanel />
-      ) : (
+      ) : activeTab === "winners" ? (
         <>
           <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-bold text-slate-900">
@@ -5682,29 +5707,11 @@ export function DashboardTabs({
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      User
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Phone
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
                       Date
                     </th>
-
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Slot
+                      Winner Text
                     </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Media
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Type
-                    </th>
-
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
                       Actions
                     </th>
@@ -5716,109 +5723,73 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={7}
+                        colSpan={3}
                       >
                         No winners found.
                       </td>
                     </tr>
                   ) : (
-                    winnerUser.map((winner) => (
-                      <tr key={winner.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-semibold text-slate-800">
-                          <span className="whitespace-pre-wrap">{winner.winner_text || [winner.users?.first_name, winner.users?.last_name].filter(Boolean).join(" ")}</span>
-                        </td>
+                    winnerUser.map((winner) => {
+                      const legacyName = [
+                        winner.users?.first_name,
+                        winner.users?.last_name,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")
+                        .trim();
+                      const displayText =
+                        winner.winner_text?.trim() ||
+                        legacyName ||
+                        "(No winner text)";
 
-                        <td className="px-4 py-3 text-slate-600">
-                          {winner.users?.phone}
-                        </td>
-
-                        <td className="px-4 py-3 text-slate-600">
-                          {winner.date}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-                            {winner.slot}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {winner.image ? (
-                            winner.media_type === "video" ? (
-                              <video
-                                src={winner.image}
-                                className="aspect-[10/7] w-28 rounded-xl object-cover"
-                                muted
-                                playsInline
-                                preload="metadata"
-                              />
-                            ) : (
-                              <img
-                                src={winner.image}
-                                alt="winner"
-                                className="aspect-[10/7] w-28 rounded-xl object-cover"
-                              />
-                            )
-                          ) : (
-                            <span className="text-slate-400">No Media</span>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              winner.media_type === "video"
-                                ? "bg-violet-100 text-violet-700"
-                                : "bg-sky-100 text-sky-700"
-                            }`}
-                          >
-                            {winner.media_type === "video" ? "Video" : "Image"}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => {
-                                setEditingWinnerId(winner.id);
-
-                                setSelectedUserId(winner.user_id ?? "");
-
-                                setWinnerDate(winner.date);
-                                setWinnerText(winner.winner_text ?? [winner.users?.first_name, winner.users?.last_name].filter(Boolean).join(" "));
-
-                                setWinnerSlot(winner.slot);
-
-                                setWinnerImage(winner.image ?? "");
-                                setWinnerMediaType(
-                                  winner.media_type === "video"
-                                    ? "video"
-                                    : "image",
-                                );
-
-                                setShowWinnerModal(true);
-                              }}
-                              className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
-                            >
-                              Edit
-                            </button>
-
-                            <button
-                              onClick={() => deleteWinner(winner.id)}
-                              className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                      return (
+                        <tr key={winner.id} className="hover:bg-slate-50">
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                            {winner.date}
+                          </td>
+                          <td className="min-w-[16rem] px-4 py-3 font-semibold text-slate-800">
+                            <span className="whitespace-pre-wrap">
+                              {displayText}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingWinnerId(winner.id);
+                                  setWinnerDate(winner.date);
+                                  setWinnerText(
+                                    winner.winner_text ?? legacyName,
+                                  );
+                                  setShowWinnerModal(true);
+                                }}
+                                className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteWinner(winner.id)}
+                                className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </div>
         </>
+      ) : (
+        <div className="admin-card p-6 text-sm text-slate-600">
+          Unknown admin module. Use the sidebar to open a valid tab.
+        </div>
       )}
       {showFraudModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
