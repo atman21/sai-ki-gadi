@@ -1,0 +1,24 @@
+-- APPROVAL REQUIRED. DO NOT RUN until ops confirms pg_cron is installed.
+--
+-- Current live project: pg_cron is NOT available.
+-- Prefer the Edge Function + external scheduler design documented in:
+--   supabase/ops/056_membership_expiry_scheduler.md
+--   supabase/functions/expire-memberships/
+--
+-- admin_expire_memberships():
+--   - marks expired gold membership_history rows as status='expired'
+--   - sets users.membership_type to 'regular' when membership_expires_at <= now()
+--   - NEVER changes users.status (account ON/OFF)
+--   - NEVER deletes payment / history rows
+--
+-- If pg_cron + pg_net are enabled later, schedule an HTTP POST to the Edge
+-- Function (same pattern as Birthday), not a bare SQL call from an untrusted role.
+
+-- Example only (commented — requires pg_cron):
+-- select cron.schedule(
+--   'skg-admin-expire-memberships',
+--   '*/15 * * * *',
+--   $$
+--   select public.admin_expire_memberships();
+--   $$
+-- );

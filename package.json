@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:admin-helpers": "node scripts/verify-admin-feature-helpers.mjs"
   },
   "dependencies": {
     "@google-cloud/text-to-speech": "^6.4.1",

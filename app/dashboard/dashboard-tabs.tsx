@@ -1,6 +1,11 @@
 "use client";
 
-import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
+import {
+  DragDropContext,
+  Draggable,
+  Droppable,
+  type DropResult,
+} from "@hello-pangea/dnd";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -23,11 +28,14 @@ import { openAdminCommandPalette } from "@/components/admin/command-palette";
 
 import { AboutUsAdminPanel } from "./components/about-us-admin-panel";
 import { InAppAnnouncementsAdminPanel } from "./components/in-app-announcements-admin-panel";
+import { MembershipManagementPanel } from "./components/membership-management-panel";
+import { WalletManagementPanel } from "./components/wallet-management-panel";
 import { AdminNavIcon } from "./admin-nav-icons";
 import { FareOverrideRequestsPanel } from "@/components/admin/fare-override-requests-panel";
 import { ActiveFareOverridesPanel } from "@/components/admin/active-fare-overrides-panel";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
 
 type MembershipCounts = {
   regular: number;
@@ -142,13 +150,11 @@ type AppUser = {
 };
 
 /** Membership state is separate from user account ON/OFF status. */
-function getMembershipStatus(user: Pick<UserRow, "membership_type" | "membership_started_at" | "membership_expires_at">, now = Date.now()): "Active" | "Expired" | "Not Subscribed" {
-  if (!user.membership_type || user.membership_type === "regular") return "Not Subscribed";
-  const expiry = user.membership_expires_at ? Date.parse(user.membership_expires_at) : NaN;
-  const start = user.membership_started_at ? Date.parse(user.membership_started_at) : NaN;
-  if (!Number.isFinite(expiry)) return "Expired";
-  if (Number.isFinite(start) && start > now) return "Expired";
-  return expiry > now ? "Active" : "Expired";
+function getMembershipStatus(
+  user: Pick<AppUser, "membership_type" | "membership_started_at" | "membership_expires_at">,
+  now = Date.now(),
+) {
+  return getMembershipLifecycleStatus(user, now);
 }
 
 const USER_ROLE_LABELS: Record<string, string> = {
@@ -413,7 +419,9 @@ type TabKey =
   | "fare-override-requests"
   | "active-fare-overrides"
   | "about-us"
-  | "in-app-popups";
+  | "in-app-popups"
+  | "wallet-management"
+  | "membership-management";
 
 type NavTabItem = {
   key: TabKey;
@@ -538,7 +546,36 @@ export function DashboardTabs({
 }: DashboardTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const initialTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    if (
+      initialTab === "overview" ||
+      initialTab === "pending" ||
+      initialTab === "rejected-partial" ||
+      initialTab === "not-started" ||
+      initialTab === "winners" ||
+      initialTab === "cities" ||
+      initialTab === "sliders" ||
+      initialTab === "users" ||
+      initialTab === "birthday-date" ||
+      initialTab === "requirements" ||
+      initialTab === "exchanges" ||
+      initialTab === "fraud-reports" ||
+      initialTab === "priority-settings" ||
+      initialTab === "profile-changes" ||
+      initialTab === "car-verification" ||
+      initialTab === "minimum-fares" ||
+      initialTab === "fare-override-requests" ||
+      initialTab === "active-fare-overrides" ||
+      initialTab === "about-us" ||
+      initialTab === "in-app-popups" ||
+      initialTab === "wallet-management" ||
+      initialTab === "membership-management"
+    ) {
+      return initialTab;
+    }
+    return "overview";
+  });
   const [navOpen, setNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [profileChangeFilter, setProfileChangeFilter] = useState<
@@ -1926,6 +1963,14 @@ export function DashboardTabs({
         items: [
           { key: "priority-settings" as TabKey, label: "Priority Timeline" },
           {
+            key: "wallet-management" as TabKey,
+            label: "Wallet Management",
+          },
+          {
+            key: "membership-management" as TabKey,
+            label: "Membership Management",
+          },
+          {
             key: "minimum-fares" as TabKey,
             label: "Minimum Fare",
             count: liveFareStats?.minimumFareRules ?? routeMinimumFares.length,
@@ -2153,7 +2198,7 @@ export function DashboardTabs({
     }
   };
 
-  const onSliderDragEnd = async (result: any) => {
+  const onSliderDragEnd = async (result: DropResult) => {
     if (!result.destination) return;
 
     const items = Array.from(sliderList);
@@ -3544,13 +3589,11 @@ export function DashboardTabs({
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Membership End
                     </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Membership Status</th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Verification
                     </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Edit DOB</th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Status
+                      Account Status
                     </th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
                       Actions
@@ -3562,7 +3605,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={30}
+                        colSpan={32}
                       >
                         No users found.
                       </td>
@@ -3735,6 +3778,36 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_by ?? 0}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_to ?? 0}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trip_points ?? 0}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
+                          {(() => {
+                            const status = getMembershipStatus(user);
+                            return (
+                              <span
+                                className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                                  status === "Active"
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : status === "Expired"
+                                      ? "bg-red-100 text-red-700"
+                                      : "bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                {status}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn-secondary"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void showMembershipHistory(user);
+                            }}
+                          >
+                            View
+                          </button>
+                        </td>
                         <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
                           {user.rating_average != null
                             ? Number(user.rating_average).toFixed(2)
@@ -3754,12 +3827,6 @@ export function DashboardTabs({
                               ).toLocaleDateString()
                             : "-"}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center">
-                          {(() => {
-                            const status = getMembershipStatus(user);
-                            return <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${status === "Active" ? "bg-emerald-100 text-emerald-700" : status === "Expired" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>{status}</span>;
-                          })()}
-                        </td>
                         <td className="whitespace-nowrap px-4 py-3">
                           <span
                             className={`rounded-full px-3 py-1 text-xs font-semibold ${
@@ -3771,7 +3838,7 @@ export function DashboardTabs({
                             {user.verified ? "Verified" : "Pending"}
                           </span>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3">
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
                           {updatingUserId === user.id ? (
                             <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
                               <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
@@ -4127,8 +4194,11 @@ export function DashboardTabs({
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Verification
                     </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Edit DOB
+                    </th>
                     <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Status
+                      Account Status
                     </th>
                   </tr>
                 </thead>
@@ -5512,9 +5582,13 @@ export function DashboardTabs({
         <ActiveFareOverridesPanel />
       ) : activeTab === "about-us" ? (
         <AboutUsAdminPanel />
+      ) : activeTab === "wallet-management" ? (
+        <WalletManagementPanel />
+      ) : activeTab === "membership-management" ? (
+        <MembershipManagementPanel />
       ) : activeTab === "in-app-popups" ? (
         <InAppAnnouncementsAdminPanel />
-      ) : (
+      ) : activeTab === "winners" ? (
         <>
           <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-bold text-slate-900">
@@ -5633,29 +5707,11 @@ export function DashboardTabs({
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      User
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Phone
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
                       Date
                     </th>
-
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Slot
+                      Winner Text
                     </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Media
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Type
-                    </th>
-
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
                       Actions
                     </th>
@@ -5667,109 +5723,73 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={7}
+                        colSpan={3}
                       >
                         No winners found.
                       </td>
                     </tr>
                   ) : (
-                    winnerUser.map((winner) => (
-                      <tr key={winner.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-semibold text-slate-800">
-                          <span className="whitespace-pre-wrap">{winner.winner_text || [winner.users?.first_name, winner.users?.last_name].filter(Boolean).join(" ")}</span>
-                        </td>
+                    winnerUser.map((winner) => {
+                      const legacyName = [
+                        winner.users?.first_name,
+                        winner.users?.last_name,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")
+                        .trim();
+                      const displayText =
+                        winner.winner_text?.trim() ||
+                        legacyName ||
+                        "(No winner text)";
 
-                        <td className="px-4 py-3 text-slate-600">
-                          {winner.users?.phone}
-                        </td>
-
-                        <td className="px-4 py-3 text-slate-600">
-                          {winner.date}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-                            {winner.slot}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {winner.image ? (
-                            winner.media_type === "video" ? (
-                              <video
-                                src={winner.image}
-                                className="aspect-[10/7] w-28 rounded-xl object-cover"
-                                muted
-                                playsInline
-                                preload="metadata"
-                              />
-                            ) : (
-                              <img
-                                src={winner.image}
-                                alt="winner"
-                                className="aspect-[10/7] w-28 rounded-xl object-cover"
-                              />
-                            )
-                          ) : (
-                            <span className="text-slate-400">No Media</span>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              winner.media_type === "video"
-                                ? "bg-violet-100 text-violet-700"
-                                : "bg-sky-100 text-sky-700"
-                            }`}
-                          >
-                            {winner.media_type === "video" ? "Video" : "Image"}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => {
-                                setEditingWinnerId(winner.id);
-
-                                setSelectedUserId(winner.user_id ?? "");
-
-                                setWinnerDate(winner.date);
-                                setWinnerText(winner.winner_text ?? [winner.users?.first_name, winner.users?.last_name].filter(Boolean).join(" "));
-
-                                setWinnerSlot(winner.slot);
-
-                                setWinnerImage(winner.image ?? "");
-                                setWinnerMediaType(
-                                  winner.media_type === "video"
-                                    ? "video"
-                                    : "image",
-                                );
-
-                                setShowWinnerModal(true);
-                              }}
-                              className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
-                            >
-                              Edit
-                            </button>
-
-                            <button
-                              onClick={() => deleteWinner(winner.id)}
-                              className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                      return (
+                        <tr key={winner.id} className="hover:bg-slate-50">
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                            {winner.date}
+                          </td>
+                          <td className="min-w-[16rem] px-4 py-3 font-semibold text-slate-800">
+                            <span className="whitespace-pre-wrap">
+                              {displayText}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingWinnerId(winner.id);
+                                  setWinnerDate(winner.date);
+                                  setWinnerText(
+                                    winner.winner_text ?? legacyName,
+                                  );
+                                  setShowWinnerModal(true);
+                                }}
+                                className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteWinner(winner.id)}
+                                className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </div>
         </>
+      ) : (
+        <div className="admin-card p-6 text-sm text-slate-600">
+          Unknown admin module. Use the sidebar to open a valid tab.
+        </div>
       )}
       {showFraudModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

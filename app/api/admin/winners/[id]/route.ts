@@ -43,7 +43,7 @@ export async function DELETE(
       return NextResponse.json(
         {
           success: false,
-          error: safeDbErrorMessage(error),
+          error: error.message,
         },
         {
           status: 500,
@@ -55,7 +55,10 @@ export async function DELETE(
       success: true,
     });
   } catch (error) {
-    console.error("Delete winner failed:", safeDbErrorMessage(error));
+    console.error(
+      "Delete winner failed:",
+      error instanceof Error ? error.message : error,
+    );
 
     return NextResponse.json(
       {
