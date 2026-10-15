@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
-import { normalizeWalletAmount } from "@/lib/admin-wallet-amount";
-import { scopeWalletIdempotencyKey } from "@/lib/admin-wallet-idempotency";
 
 type WalletTransactionType = "credit" | "debit";
 
@@ -15,34 +13,21 @@ const ALLOWED_SOURCES = new Set([
   "admin_adjustment",
 ]);
 
-const DEFAULT_PAGE_SIZE = 50;
-const MAX_PAGE_SIZE = 100;
-
-function parsePage(value: string | null): number {
-  const n = Number(value ?? "1");
-  if (!Number.isInteger(n) || n < 1) return 1;
-  return n;
-}
-
-function parsePageSize(value: string | null): number {
-  const n = Number(value ?? String(DEFAULT_PAGE_SIZE));
-  if (!Number.isInteger(n) || n < 1) return DEFAULT_PAGE_SIZE;
-  return Math.min(n, MAX_PAGE_SIZE);
+function normalizeAmount(value: unknown): number | null {
+  const amount = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  if (Math.abs(amount - Number(amount.toFixed(2))) > 1e-9) return null;
+  return amount;
 }
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const gate = await requireAdminApi();
   if (!gate.ok) return gate.response;
 
   const { id } = await params;
-  const { searchParams } = new URL(request.url);
-  const page = parsePage(searchParams.get("page"));
-  const pageSize = parsePageSize(searchParams.get("pageSize"));
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
 
   const [userResult, accountResult, transactionsResult] = await Promise.all([
     gate.supabase.from("users").select("id").eq("id", id).maybeSingle(),
@@ -55,12 +40,11 @@ export async function GET(
       .from("wallet_transactions")
       .select(
         "id, transaction_type, amount, balance_before, balance_after, source, remarks, reference_type, reference_id, created_by, created_at",
-        { count: "exact" },
       )
       .eq("user_id", id)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
-      .range(from, to),
+      .limit(100),
   ]);
 
   if (userResult.error) {
@@ -75,44 +59,28 @@ export async function GET(
 
   if (accountResult.error) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: safeErrorMessage(accountResult.error, "Unable to load wallet balance."),
-      },
+      { ok: false, error: safeErrorMessage(accountResult.error, "Unable to load wallet balance.") },
       { status: 500 },
     );
   }
   if (transactionsResult.error) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: safeErrorMessage(
-          transactionsResult.error,
-          "Unable to load wallet transactions.",
-        ),
-      },
+      { ok: false, error: safeErrorMessage(transactionsResult.error, "Unable to load wallet transactions.") },
       { status: 500 },
     );
   }
-
-  const total = transactionsResult.count ?? 0;
-  const transactions = (transactionsResult.data ?? []).map((row) => ({
-    ...row,
-    amount: Number(row.amount),
-    balance_before: Number(row.balance_before),
-    balance_after: Number(row.balance_after),
-  }));
 
   return NextResponse.json({
     ok: true,
     wallet: {
       balance: Number(accountResult.data?.balance ?? 0),
       updated_at: accountResult.data?.updated_at ?? null,
-      transactions,
-      page,
-      pageSize,
-      total,
-      hasMore: from + transactions.length < total,
+      transactions: (transactionsResult.data ?? []).map((row) => ({
+        ...row,
+        amount: Number(row.amount),
+        balance_before: Number(row.balance_before),
+        balance_after: Number(row.balance_after),
+      })),
     },
   });
 }
@@ -138,7 +106,7 @@ export async function POST(
     return NextResponse.json({ ok: false, error: "Select Credit or Debit." }, { status: 400 });
   }
 
-  const amount = normalizeWalletAmount(body.amount);
+  const amount = normalizeAmount(body.amount);
   if (amount == null) {
     return NextResponse.json(
       { ok: false, error: "Enter a valid amount with maximum 2 decimal places." },
@@ -159,14 +127,8 @@ export async function POST(
 
   const referenceType = String(body.reference_type ?? "").trim() || null;
   const referenceId = String(body.reference_id ?? "").trim() || null;
-
-  // Always rebind the key to this path's user id so a copied key from another
-  // user/session cannot collide with a different ledger stream.
-  const scopedKey = scopeWalletIdempotencyKey(
-    id,
-    String(body.idempotency_key ?? ""),
-  );
-  if (!scopedKey) {
+  const idempotencyKey = String(body.idempotency_key ?? "").trim();
+  if (!idempotencyKey || idempotencyKey.length > 200) {
     return NextResponse.json(
       { ok: false, error: "A valid idempotency key is required." },
       { status: 400 },
@@ -181,7 +143,7 @@ export async function POST(
     p_source: source,
     p_reference_type: referenceType,
     p_reference_id: referenceId,
-    p_idempotency_key: scopedKey,
+    p_idempotency_key: idempotencyKey,
     p_created_by: "admin_panel",
   });
 
@@ -191,9 +153,5 @@ export async function POST(
     return NextResponse.json({ ok: false, error: message }, { status });
   }
 
-  return NextResponse.json({
-    ok: true,
-    result: data,
-    idempotency_key: scopedKey,
-  });
+  return NextResponse.json({ ok: true, result: data });
 }

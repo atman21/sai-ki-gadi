@@ -2,8 +2,6 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { buildWalletIdempotencyKey } from "@/lib/admin-wallet-idempotency";
-
 type WalletTransaction = {
   id: string;
   transaction_type: "credit" | "debit";
@@ -25,14 +23,8 @@ type WalletResponse = {
     balance: number;
     updated_at: string | null;
     transactions: WalletTransaction[];
-    page?: number;
-    pageSize?: number;
-    total?: number;
-    hasMore?: boolean;
   };
 };
-
-const PAGE_SIZE = 50;
 
 const SOURCE_OPTIONS = {
   credit: [
@@ -74,14 +66,17 @@ function dateTime(value: string) {
   }).format(date);
 }
 
+function newIdempotencyKey() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `admin-wallet-${crypto.randomUUID()}`;
+  }
+  return `admin-wallet-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function AdminWalletPanel({ userId }: { userId: string }) {
   const [balance, setBalance] = useState<number | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -90,57 +85,28 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
   const [source, setSource] = useState("lucky_draw_prize");
   const [remarks, setRemarks] = useState("");
   const [referenceId, setReferenceId] = useState("");
-  const pendingSubmission = useRef<{ fingerprint: string; key: string } | null>(
-    null,
-  );
-
-  const fetchWalletPage = useCallback(
-    async (nextPage: number, mode: "replace" | "append") => {
-      const response = await fetch(
-        `/api/admin/users/${encodeURIComponent(userId)}/wallet?page=${nextPage}&pageSize=${PAGE_SIZE}`,
-        { cache: "no-store" },
-      );
-      const data = (await response.json()) as WalletResponse;
-      if (!response.ok || !data.ok || !data.wallet) {
-        throw new Error(data.error || "Unable to load wallet.");
-      }
-
-      setBalance(Number(data.wallet.balance));
-      setPage(data.wallet.page ?? nextPage);
-      setTotal(data.wallet.total ?? data.wallet.transactions.length);
-      setHasMore(Boolean(data.wallet.hasMore));
-      setTransactions((prev) => {
-        if (mode === "replace") return data.wallet!.transactions;
-        const seen = new Set(prev.map((tx) => tx.id));
-        const merged = [...prev];
-        for (const tx of data.wallet!.transactions) {
-          if (!seen.has(tx.id)) merged.push(tx);
-        }
-        return merged;
-      });
-    },
-    [userId],
-  );
+  const pendingSubmission = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const loadWallet = useCallback(async () => {
     setError(null);
     try {
-      await fetchWalletPage(1, "replace");
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/wallet`, {
+        cache: "no-store",
+      });
+      const data = (await response.json()) as WalletResponse;
+      if (!response.ok || !data.ok || !data.wallet) {
+        throw new Error(data.error || "Unable to load wallet.");
+      }
+      setBalance(Number(data.wallet.balance));
+      setTransactions(data.wallet.transactions);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load wallet.");
     } finally {
       setLoading(false);
-      setLoadingMore(false);
     }
-  }, [fetchWalletPage]);
+  }, [userId]);
 
   useEffect(() => {
-    setLoading(true);
-    setTransactions([]);
-    setPage(1);
-    setTotal(0);
-    setHasMore(false);
-    pendingSubmission.current = null;
     void loadWallet();
   }, [loadWallet]);
 
@@ -150,26 +116,9 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
 
   const parsedAmount = Number(amount);
   const balanceAfter = useMemo(() => {
-    if (balance == null || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      return null;
-    }
-    return transactionType === "credit"
-      ? balance + parsedAmount
-      : balance - parsedAmount;
+    if (balance == null || !Number.isFinite(parsedAmount) || parsedAmount <= 0) return null;
+    return transactionType === "credit" ? balance + parsedAmount : balance - parsedAmount;
   }, [balance, parsedAmount, transactionType]);
-
-  async function loadMore() {
-    if (!hasMore || loadingMore) return;
-    setLoadingMore(true);
-    setError(null);
-    try {
-      await fetchWalletPage(page + 1, "append");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load more transactions.");
-    } finally {
-      setLoadingMore(false);
-    }
-  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -199,41 +148,34 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
     if (!confirmed) return;
 
     const fingerprint = JSON.stringify({
-      user_id: userId,
       transaction_type: transactionType,
       amount: parsedAmount,
       source,
       remarks: remarks.trim(),
       reference_id: referenceId.trim() || null,
     });
-    if (
-      !pendingSubmission.current ||
-      pendingSubmission.current.fingerprint !== fingerprint
-    ) {
+    if (!pendingSubmission.current || pendingSubmission.current.fingerprint !== fingerprint) {
       pendingSubmission.current = {
         fingerprint,
-        key: buildWalletIdempotencyKey(userId),
+        key: newIdempotencyKey(),
       };
     }
 
     setPosting(true);
     try {
-      const response = await fetch(
-        `/api/admin/users/${encodeURIComponent(userId)}/wallet`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            transaction_type: transactionType,
-            amount: parsedAmount,
-            source,
-            remarks: remarks.trim(),
-            reference_type: referenceId.trim() ? source : null,
-            reference_id: referenceId.trim() || null,
-            idempotency_key: pendingSubmission.current.key,
-          }),
-        },
-      );
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/wallet`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          transaction_type: transactionType,
+          amount: parsedAmount,
+          source,
+          remarks: remarks.trim(),
+          reference_type: referenceId.trim() ? source : null,
+          reference_id: referenceId.trim() || null,
+          idempotency_key: pendingSubmission.current.key,
+        }),
+      });
       const data = (await response.json()) as { ok: boolean; error?: string };
       if (!response.ok || !data.ok) {
         throw new Error(data.error || "Unable to post wallet transaction.");
@@ -247,9 +189,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       setLoading(true);
       await loadWallet();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Unable to post wallet transaction.",
-      );
+      setError(err instanceof Error ? err.message : "Unable to post wallet transaction.");
     } finally {
       setPosting(false);
     }
@@ -261,14 +201,11 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
         <div>
           <h2 className="text-lg font-bold text-slate-900">Wallet</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Credit or debit this user&apos;s wallet. Every change is stored in an
-            immutable transaction ledger.
+            Credit or debit this user's wallet. Every change is stored in an immutable transaction ledger.
           </p>
         </div>
         <div className="rounded-xl bg-slate-900 px-5 py-3 text-white">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-            Current Balance
-          </p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Current Balance</p>
           <p className="mt-1 text-2xl font-bold">
             {loading && balance == null
               ? "Loading..."
@@ -279,18 +216,13 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
         </div>
       </div>
 
-      <form
-        onSubmit={submit}
-        className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4"
-      >
+      <form onSubmit={submit} className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <label className="text-sm font-semibold text-slate-700">
             Transaction
             <select
               value={transactionType}
-              onChange={(event) =>
-                setTransactionType(event.target.value as "credit" | "debit")
-              }
+              onChange={(event) => setTransactionType(event.target.value as "credit" | "debit")}
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
               disabled={posting}
             >
@@ -320,16 +252,13 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
               disabled={posting}
             >
               {SOURCE_OPTIONS[transactionType].map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
+                <option key={value} value={value}>{label}</option>
               ))}
             </select>
           </label>
 
           <label className="text-sm font-semibold text-slate-700">
-            Reference ID{" "}
-            <span className="font-normal text-slate-400">(optional)</span>
+            Reference ID <span className="font-normal text-slate-400">(optional)</span>
             <input
               value={referenceId}
               onChange={(event) => setReferenceId(event.target.value)}
@@ -352,31 +281,15 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
           </label>
 
           <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Balance After
-            </p>
-            <p
-              className={`mt-1 text-lg font-bold ${
-                balanceAfter != null && balanceAfter < 0
-                  ? "text-red-600"
-                  : "text-slate-900"
-              }`}
-            >
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Balance After</p>
+            <p className={`mt-1 text-lg font-bold ${balanceAfter != null && balanceAfter < 0 ? "text-red-600" : "text-slate-900"}`}>
               {balanceAfter == null ? "—" : money(balanceAfter)}
             </p>
           </div>
         </div>
 
-        {error ? (
-          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
-            {error}
-          </p>
-        ) : null}
-        {success ? (
-          <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-            {success}
-          </p>
-        ) : null}
+        {error ? <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</p> : null}
+        {success ? <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{success}</p> : null}
 
         <div className="mt-4 flex justify-end">
           <button
@@ -384,11 +297,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
             disabled={posting || loading || balance == null}
             className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {posting
-              ? "Posting..."
-              : transactionType === "credit"
-                ? "Add Credit"
-                : "Add Debit"}
+            {posting ? "Posting..." : transactionType === "credit" ? "Add Credit" : "Add Debit"}
           </button>
         </div>
       </form>
@@ -397,18 +306,11 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h3 className="font-bold text-slate-900">Transaction Ledger</h3>
-            <p className="text-xs text-slate-500">
-              Showing {transactions.length} of {total} transaction
-              {total === 1 ? "" : "s"}. Ledger entries are not editable or
-              deletable.
-            </p>
+            <p className="text-xs text-slate-500">Latest 100 transactions. Ledger entries are not editable or deletable.</p>
           </div>
           <button
             type="button"
-            onClick={() => {
-              setLoading(true);
-              void loadWallet();
-            }}
+            onClick={() => { setLoading(true); void loadWallet(); }}
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
           >
             Refresh
@@ -419,111 +321,41 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50">
               <tr>
-                {[
-                  "Date / Time",
-                  "Type",
-                  "Amount",
-                  "Source",
-                  "Remarks",
-                  "Before",
-                  "After",
-                  "Created By",
-                ].map((label) => (
-                  <th
-                    key={label}
-                    className="whitespace-nowrap px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-500"
-                  >
-                    {label}
-                  </th>
+                {["Date / Time", "Type", "Amount", "Source", "Remarks", "Before", "After", "Created By"].map((label) => (
+                  <th key={label} className="whitespace-nowrap px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{label}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {loading && transactions.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
-                    Loading wallet...
-                  </td>
-                </tr>
+                <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">Loading wallet...</td></tr>
               ) : balance == null && error ? (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="px-3 py-8 text-center font-semibold text-red-600"
-                  >
-                    Wallet data unavailable. Refresh before posting any
-                    transaction.
-                  </td>
-                </tr>
+                <tr><td colSpan={8} className="px-3 py-8 text-center font-semibold text-red-600">Wallet data unavailable. Refresh before posting any transaction.</td></tr>
               ) : transactions.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
-                    No wallet transactions yet.
-                  </td>
-                </tr>
+                <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">No wallet transactions yet.</td></tr>
               ) : (
                 transactions.map((tx) => (
                   <tr key={tx.id}>
-                    <td className="whitespace-nowrap px-3 py-3 text-slate-600">
-                      {dateTime(tx.created_at)}
-                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-slate-600">{dateTime(tx.created_at)}</td>
                     <td className="px-3 py-3">
-                      <span
-                        className={`rounded-full px-2 py-1 text-xs font-bold ${
-                          tx.transaction_type === "credit"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-red-50 text-red-700"
-                        }`}
-                      >
+                      <span className={`rounded-full px-2 py-1 text-xs font-bold ${tx.transaction_type === "credit" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
                         {tx.transaction_type === "credit" ? "Credit" : "Debit"}
                       </span>
                     </td>
-                    <td
-                      className={`whitespace-nowrap px-3 py-3 font-bold ${
-                        tx.transaction_type === "credit"
-                          ? "text-emerald-700"
-                          : "text-red-700"
-                      }`}
-                    >
-                      {tx.transaction_type === "credit" ? "+" : "-"}
-                      {money(tx.amount)}
+                    <td className={`whitespace-nowrap px-3 py-3 font-bold ${tx.transaction_type === "credit" ? "text-emerald-700" : "text-red-700"}`}>
+                      {tx.transaction_type === "credit" ? "+" : "-"}{money(tx.amount)}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-slate-700">
-                      {SOURCE_LABELS[tx.source] ?? tx.source}
-                    </td>
-                    <td className="min-w-64 px-3 py-3 text-slate-700">
-                      {tx.remarks}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-slate-600">
-                      {money(tx.balance_before)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-900">
-                      {money(tx.balance_after)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-slate-500">
-                      {tx.created_by || "—"}
-                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-slate-700">{SOURCE_LABELS[tx.source] ?? tx.source}</td>
+                    <td className="min-w-64 px-3 py-3 text-slate-700">{tx.remarks}</td>
+                    <td className="whitespace-nowrap px-3 py-3 text-slate-600">{money(tx.balance_before)}</td>
+                    <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-900">{money(tx.balance_after)}</td>
+                    <td className="whitespace-nowrap px-3 py-3 text-slate-500">{tx.created_by || "—"}</td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
-
-        {hasMore ? (
-          <div className="mt-3 flex justify-center">
-            <button
-              type="button"
-              onClick={() => void loadMore()}
-              disabled={loadingMore}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
-            >
-              {loadingMore
-                ? "Loading…"
-                : `Load more (${transactions.length} / ${total})`}
-            </button>
-          </div>
-        ) : null}
       </div>
     </section>
   );
