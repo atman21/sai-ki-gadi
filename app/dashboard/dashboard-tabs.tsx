@@ -423,6 +423,36 @@ type TabKey =
   | "wallet-management"
   | "membership-management";
 
+const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
+  "overview",
+  "pending",
+  "rejected-partial",
+  "not-started",
+  "winners",
+  "cities",
+  "sliders",
+  "users",
+  "birthday-date",
+  "requirements",
+  "exchanges",
+  "fraud-reports",
+  "priority-settings",
+  "profile-changes",
+  "car-verification",
+  "minimum-fares",
+  "fare-override-requests",
+  "active-fare-overrides",
+  "about-us",
+  "in-app-popups",
+  "wallet-management",
+  "membership-management",
+]);
+
+function parseTabKey(value: string | null | undefined): TabKey {
+  if (value && TAB_KEYS.has(value)) return value as TabKey;
+  return "overview";
+}
+
 type NavTabItem = {
   key: TabKey;
   label: string;
@@ -546,36 +576,9 @@ export function DashboardTabs({
 }: DashboardTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab");
-  const [activeTab, setActiveTab] = useState<TabKey>(() => {
-    if (
-      initialTab === "overview" ||
-      initialTab === "pending" ||
-      initialTab === "rejected-partial" ||
-      initialTab === "not-started" ||
-      initialTab === "winners" ||
-      initialTab === "cities" ||
-      initialTab === "sliders" ||
-      initialTab === "users" ||
-      initialTab === "birthday-date" ||
-      initialTab === "requirements" ||
-      initialTab === "exchanges" ||
-      initialTab === "fraud-reports" ||
-      initialTab === "priority-settings" ||
-      initialTab === "profile-changes" ||
-      initialTab === "car-verification" ||
-      initialTab === "minimum-fares" ||
-      initialTab === "fare-override-requests" ||
-      initialTab === "active-fare-overrides" ||
-      initialTab === "about-us" ||
-      initialTab === "in-app-popups" ||
-      initialTab === "wallet-management" ||
-      initialTab === "membership-management"
-    ) {
-      return initialTab;
-    }
-    return "overview";
-  });
+  const [activeTab, setActiveTab] = useState<TabKey>(() =>
+    parseTabKey(searchParams.get("tab")),
+  );
   const [navOpen, setNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [profileChangeFilter, setProfileChangeFilter] = useState<
@@ -599,11 +602,7 @@ export function DashboardTabs({
   );
 
   useEffect(() => {
-    const tab = searchParams.get("tab") as TabKey | null;
-
-    if (tab) {
-      setActiveTab(tab);
-    }
+    setActiveTab(parseTabKey(searchParams.get("tab")));
   }, [searchParams]);
   const [reqSearch, setReqSearch] = useState("");
   const [reqStatus, setReqStatus] = useState("all");
@@ -2758,15 +2757,18 @@ export function DashboardTabs({
         </div>
       ) : null}
 
-      <button
-        type="button"
-        className="admin-btn admin-btn-secondary lg:hidden min-h-11 w-full justify-center"
-        onClick={() => setNavOpen((v) => !v)}
-        aria-expanded={navOpen}
-        aria-controls="admin-side-nav"
-      >
-        {navOpen ? "Close menu" : "Modules"}
-      </button>
+      {/* Wrapper (not .admin-btn) so `lg:hidden` reliably removes this flex child */}
+      <div className="w-full lg:hidden">
+        <button
+          type="button"
+          className="admin-btn admin-btn-secondary min-h-11 w-full justify-center"
+          onClick={() => setNavOpen((v) => !v)}
+          aria-expanded={navOpen}
+          aria-controls="admin-side-nav"
+        >
+          {navOpen ? "Close menu" : "Modules"}
+        </button>
+      </div>
 
       {navOpen ? (
         <button
@@ -2783,7 +2785,16 @@ export function DashboardTabs({
           sidebarCollapsed ? "is-collapsed lg:w-[var(--admin-sidebar-w-collapsed)]" : "lg:w-[var(--admin-sidebar-w)]"
         } w-72 ${navOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
-        <button type="button" className="admin-btn admin-btn-secondary mb-3 flex w-full justify-center lg:hidden" onClick={() => setNavOpen(false)} aria-label="Close modules navigation">Close navigation</button>
+        <div className="mb-3 lg:hidden">
+          <button
+            type="button"
+            className="admin-btn admin-btn-secondary flex w-full justify-center"
+            onClick={() => setNavOpen(false)}
+            aria-label="Close modules navigation"
+          >
+            Close navigation
+          </button>
+        </div>
         <div className="mb-3 flex items-center justify-between gap-2 px-1">
           <div className="admin-sidebar-brand-text min-w-0">
             <p className="admin-eyebrow">Sai Ki Gadi</p>

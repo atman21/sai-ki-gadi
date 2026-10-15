@@ -1,6 +1,5 @@
 import { AdminCommandPalette } from "@/components/admin/command-palette";
 import { AdminTopHeader } from "@/components/admin/admin-top-header";
-import { ADMIN_FONT_SIZE_BOOTSTRAP_SCRIPT } from "@/lib/admin-font-size";
 
 /**
  * Shared dashboard chrome for main dashboard and detail routes.
@@ -12,9 +11,6 @@ export default function DashboardLayout({
 }) {
   return (
     <div className="admin-shell relative">
-      <script
-        dangerouslySetInnerHTML={{ __html: ADMIN_FONT_SIZE_BOOTSTRAP_SCRIPT }}
-      />
       <AdminTopHeader />
       <AdminCommandPalette />
       {children}

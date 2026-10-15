@@ -138,25 +138,34 @@ body {
 }
 
 /* Buttons */
-.admin-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  height: 2.25rem;
-  padding: 0 0.875rem;
-  border-radius: var(--admin-radius-sm);
-  font-size: calc(0.8125rem * var(--admin-text-scale, 1));
-  font-weight: 600;
-  line-height: 1;
-  border: 1px solid transparent;
-  transition: background-color var(--admin-duration) var(--admin-ease),
-    border-color var(--admin-duration) var(--admin-ease),
-    color var(--admin-duration) var(--admin-ease),
-    box-shadow var(--admin-duration) var(--admin-ease),
-    opacity var(--admin-duration) var(--admin-ease);
-  cursor: pointer;
-  white-space: nowrap;
+/*
+ * Keep admin button styles in @layer components so Tailwind utilities
+ * (e.g. `hidden`, `lg:hidden`, `lg:inline-flex`) can override `display`.
+ * Unlayered `.admin-btn { display: inline-flex }` previously beat those
+ * utilities and left the mobile "Modules" toggle visible in `lg:flex-row`,
+ * where `w-full` consumed the row and squeezed main content to width 0.
+ */
+@layer components {
+  .admin-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 2.25rem;
+    padding: 0 0.875rem;
+    border-radius: var(--admin-radius-sm);
+    font-size: calc(0.8125rem * var(--admin-text-scale, 1));
+    font-weight: 600;
+    line-height: 1;
+    border: 1px solid transparent;
+    transition: background-color var(--admin-duration) var(--admin-ease),
+      border-color var(--admin-duration) var(--admin-ease),
+      color var(--admin-duration) var(--admin-ease),
+      box-shadow var(--admin-duration) var(--admin-ease),
+      opacity var(--admin-duration) var(--admin-ease);
+    cursor: pointer;
+    white-space: nowrap;
+  }
 }
 
 .admin-btn:focus-visible {
