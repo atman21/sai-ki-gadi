@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 
+import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { PageHeader } from "@/components/admin/ui/page-header";
 import { formatDateTime } from "@/lib/format-datetime";
 import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
@@ -315,10 +316,17 @@ export function MembershipManagementPanel() {
               const status = getMembershipLifecycleStatus(user);
               return (
                 <li key={user.id}>
-                  <button
-                    type="button"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => selectUser(user)}
-                    className={`flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition ${
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        selectUser(user);
+                      }
+                    }}
+                    className={`flex w-full cursor-pointer flex-col items-start gap-0.5 px-4 py-3 text-left transition ${
                       isActive
                         ? "bg-slate-900 text-white"
                         : "bg-white text-slate-800 hover:bg-slate-50"
@@ -326,19 +334,38 @@ export function MembershipManagementPanel() {
                   >
                     <span className="font-semibold">{user.full_name}</span>
                     <span
-                      className={`text-sm ${isActive ? "text-slate-300" : "text-slate-500"}`}
+                      className={`flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm ${isActive ? "text-slate-300" : "text-slate-500"}`}
                     >
-                      {[
-                        user.phone,
-                        user.business_name,
-                        `Plan: ${user.membership_type ?? "regular"}`,
-                        status,
-                        `Account: ${user.status === false ? "OFF" : "ON"}`,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
+                      {user.phone ? (
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <PhoneNumberAction
+                            phone={user.phone}
+                            triggerClassName={
+                              isActive
+                                ? "text-sky-200 hover:text-white"
+                                : undefined
+                            }
+                          />
+                        </span>
+                      ) : null}
+                      {user.phone && user.business_name ? (
+                        <span aria-hidden>·</span>
+                      ) : null}
+                      {user.business_name ? (
+                        <span>{user.business_name}</span>
+                      ) : null}
+                      {(user.phone || user.business_name) && (
+                        <span aria-hidden>·</span>
+                      )}
+                      <span>Plan: {user.membership_type ?? "regular"}</span>
+                      <span aria-hidden>·</span>
+                      <span>{status}</span>
+                      <span aria-hidden>·</span>
+                      <span>
+                        Account: {user.status === false ? "OFF" : "ON"}
+                      </span>
                     </span>
-                  </button>
+                  </div>
                 </li>
               );
             })}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import {
   ANNOUNCEMENT_CATEGORIES,
   ANNOUNCEMENT_STATUSES,
@@ -799,15 +800,30 @@ export function InAppAnnouncementsAdminPanel() {
                     {selectedUsers.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
                         {selectedUsers.map((user) => (
-                          <button
+                          <span
                             key={user.id}
-                            type="button"
-                            className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-800 hover:bg-indigo-100"
-                            onClick={() => removeSelectedUser(user.id)}
-                            title="Remove selected user"
+                            className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-800"
                           >
-                            {user.fullName} · {user.phone} ×
-                          </button>
+                            <span>{user.fullName}</span>
+                            {user.phone && user.phone !== "—" ? (
+                              <>
+                                <span aria-hidden>·</span>
+                                <PhoneNumberAction
+                                  phone={user.phone}
+                                  triggerClassName="min-h-8 px-0.5 text-xs text-indigo-800"
+                                />
+                              </>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="ml-0.5 rounded-full px-1 hover:bg-indigo-100"
+                              onClick={() => removeSelectedUser(user.id)}
+                              title="Remove selected user"
+                              aria-label={`Remove ${user.fullName}`}
+                            >
+                              ×
+                            </button>
+                          </span>
                         ))}
                       </div>
                     ) : null}
@@ -826,8 +842,17 @@ export function InAppAnnouncementsAdminPanel() {
                               checked={checked}
                               onChange={() => toggleSelectedUser(user)}
                             />
-                            <span>
-                              {user.fullName} · {user.phone}
+                            <span className="inline-flex flex-wrap items-center gap-x-1">
+                              <span>{user.fullName}</span>
+                              {user.phone && user.phone !== "—" ? (
+                                <>
+                                  <span aria-hidden>·</span>
+                                  <PhoneNumberAction
+                                    phone={user.phone}
+                                    triggerClassName="min-h-8 px-0.5 text-xs"
+                                  />
+                                </>
+                              ) : null}
                             </span>
                           </label>
                         );

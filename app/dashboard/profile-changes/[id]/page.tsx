@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { formatDateTime } from "@/lib/format-datetime";
 import {
   serviceRoleConfigIssue,
@@ -9,6 +10,13 @@ import {
 } from "@/lib/supabase-admin";
 
 import { ProfileChangeActions } from "./profile-change-actions";
+
+const PHONE_CHANGE_FIELDS = new Set([
+  "phone",
+  "reference_phone",
+  "reference_1_mobile",
+  "reference_2_mobile",
+]);
 
 export const dynamic = "force-dynamic";
 
@@ -58,10 +66,10 @@ const FIELD_LABELS: Record<string, string> = {
   vehicle_experience: "Vehicle experience",
 };
 
-function userLabel(row: RequestRow): string {
+function userDisplayName(row: RequestRow): string {
   const u = row.users;
   const name = `${u?.first_name ?? ""} ${u?.last_name ?? ""}`.trim();
-  return name || u?.phone || u?.email || row.user_id;
+  return name || u?.email || row.user_id;
 }
 
 export default async function ProfileChangeDetailPage({
@@ -157,7 +165,15 @@ export default async function ProfileChangeDetailPage({
           <h1 className="text-xl font-bold text-slate-900">
             Profile Change Request
           </h1>
-          <p className="mt-1 text-sm text-slate-600">{userLabel(row)}</p>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-slate-600">
+            <span>{userDisplayName(row)}</span>
+            {row.users?.phone ? (
+              <>
+                <span aria-hidden>·</span>
+                <PhoneNumberAction phone={row.users.phone} />
+              </>
+            ) : null}
+          </p>
 
           <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
             <div>
@@ -210,10 +226,26 @@ export default async function ProfileChangeDetailPage({
                       {FIELD_LABELS[field] ?? field}
                     </p>
                     <p className="mt-1 text-sm text-slate-600">
-                      Old: {change.old_value || "—"}
+                      Old:{" "}
+                      {PHONE_CHANGE_FIELDS.has(field) ? (
+                        <PhoneNumberAction
+                          phone={change.old_value}
+                          emptyLabel="—"
+                        />
+                      ) : (
+                        change.old_value || "—"
+                      )}
                     </p>
                     <p className="text-sm font-semibold text-indigo-700">
-                      New: {change.new_value || "—"}
+                      New:{" "}
+                      {PHONE_CHANGE_FIELDS.has(field) ? (
+                        <PhoneNumberAction
+                          phone={change.new_value}
+                          emptyLabel="—"
+                        />
+                      ) : (
+                        change.new_value || "—"
+                      )}
                     </p>
                   </div>
                 );

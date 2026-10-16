@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
@@ -43,10 +44,6 @@ function userLabel(users: FareOverrideRequestRow["users"]): string {
   if (!u) return "Unknown user";
   const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
   return name || u.phone || "Unknown user";
-}
-
-function userPhone(users: FareOverrideRequestRow["users"]): string {
-  return userEmbed(users)?.phone?.trim() || "—";
 }
 
 function formatInr(n: number) {
@@ -417,7 +414,10 @@ export function FareOverrideRequestsPanel() {
                         {userLabel(row.users)}
                       </div>
                       <div className="mt-0.5 text-xs text-slate-500">
-                        {userPhone(row.users)}
+                        <PhoneNumberAction
+                          phone={userEmbed(row.users)?.phone}
+                          emptyLabel="—"
+                        />
                       </div>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
@@ -541,7 +541,12 @@ export function FareOverrideRequestsPanel() {
               <div>
                 <dt className="font-semibold text-slate-500">User</dt>
                 <dd className="text-slate-900">{userLabel(review.users)}</dd>
-                <dd className="text-slate-600">{userPhone(review.users)}</dd>
+                <dd className="text-slate-600">
+                  <PhoneNumberAction
+                    phone={userEmbed(review.users)?.phone}
+                    emptyLabel="—"
+                  />
+                </dd>
               </div>
               <div>
                 <dt className="font-semibold text-slate-500">Route</dt>

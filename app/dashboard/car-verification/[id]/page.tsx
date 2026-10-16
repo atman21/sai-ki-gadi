@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { formatDateTime } from "@/lib/format-datetime";
 import {
   serviceRoleConfigIssue,
@@ -181,7 +182,9 @@ export default async function CarVerificationDetailPage({
             <div>
               <dt className="text-slate-500">User</dt>
               <dd className="font-semibold text-slate-900">{ownerName}</dd>
-              <dd className="text-slate-600">{owner?.phone || "—"}</dd>
+              <dd className="text-slate-600">
+                <PhoneNumberAction phone={owner?.phone} emptyLabel="—" />
+              </dd>
             </div>
             <div>
               <dt className="text-slate-500">Registration Number</dt>

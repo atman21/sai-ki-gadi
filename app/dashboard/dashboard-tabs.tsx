@@ -33,6 +33,7 @@ import { WalletManagementPanel } from "./components/wallet-management-panel";
 import { AdminNavIcon } from "./admin-nav-icons";
 import { FareOverrideRequestsPanel } from "@/components/admin/fare-override-requests-panel";
 import { ActiveFareOverridesPanel } from "@/components/admin/active-fare-overrides-panel";
+import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
@@ -3148,8 +3149,11 @@ export function DashboardTabs({
                             {user.id.slice(0, 8)}...
                           </p>
                         </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {user.phone}
+                        <td
+                          className="px-4 py-3 text-slate-600"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <PhoneNumberAction phone={user.phone} emptyLabel="-" />
                         </td>
                         <td className="px-4 py-3 text-slate-600">
                           {user.email}
@@ -3215,7 +3219,9 @@ export function DashboardTabs({
                           {user.id.slice(0, 8)}...
                         </p>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{user.phone}</td>
+                      <td className="px-4 py-3 text-slate-600">
+                        <PhoneNumberAction phone={user.phone} emptyLabel="-" />
+                      </td>
                       <td className="px-4 py-3 text-slate-600">{user.email}</td>
                       <td className="px-4 py-3 text-slate-600">
                         <StatusBadge
@@ -3271,7 +3277,9 @@ export function DashboardTabs({
                           {user.id.slice(0, 8)}...
                         </p>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{user.phone}</td>
+                      <td className="px-4 py-3 text-slate-600">
+                        <PhoneNumberAction phone={user.phone} emptyLabel="-" />
+                      </td>
                       <td className="px-4 py-3 text-slate-600">{user.email}</td>
                       <td className="px-4 py-3 text-slate-600">
                         <StatusBadge
@@ -3637,8 +3645,11 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
                           {user.first_name ?? "-"} {user.last_name ?? "-"}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {cellDash(user.phone)}
+                        <td
+                          className="whitespace-nowrap px-4 py-3 text-slate-600"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <PhoneNumberAction phone={user.phone} emptyLabel="-" />
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                           {cellDash(user.email)}
@@ -3692,14 +3703,26 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                           {cellDash(user.reference_1_name)}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {cellDash(user.reference_1_mobile)}
+                        <td
+                          className="whitespace-nowrap px-4 py-3 text-slate-700"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <PhoneNumberAction
+                            phone={user.reference_1_mobile}
+                            emptyLabel="-"
+                          />
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                           {cellDash(user.reference_2_name)}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {cellDash(user.reference_2_mobile)}
+                        <td
+                          className="whitespace-nowrap px-4 py-3 text-slate-700"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <PhoneNumberAction
+                            phone={user.reference_2_mobile}
+                            emptyLabel="-"
+                          />
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                           {formatUserRolesCell(user.user_roles)}
@@ -4241,8 +4264,11 @@ export function DashboardTabs({
                         <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                           {cellDash(user.email)}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {cellDash(user.phone)}
+                        <td
+                          className="whitespace-nowrap px-4 py-3 text-slate-600"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <PhoneNumberAction phone={user.phone} emptyLabel="-" />
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                           {formatBirthDateCell(user.birth_date)}
@@ -4509,7 +4535,10 @@ export function DashboardTabs({
                         </td>
 
                         <td className="px-6 py-4 text-slate-700">
-                          {item.users?.phone}
+                          <PhoneNumberAction
+                            phone={item.users?.phone}
+                            emptyLabel="-"
+                          />
                         </td>
 
                         <td className="px-6 py-4 text-slate-700">
@@ -4555,7 +4584,10 @@ export function DashboardTabs({
                         </td>
 
                         <td className="px-6 py-4 font-medium text-slate-900">
-                          {item.assigned_user?.phone ?? "-"}
+                          <PhoneNumberAction
+                            phone={item.assigned_user?.phone}
+                            emptyLabel="-"
+                          />
                         </td>
 
                         <td className="px-6 py-4 text-slate-500">
@@ -4709,7 +4741,10 @@ export function DashboardTabs({
                       </td>
 
                       <td className="px-6 py-4 text-slate-700">
-                        {item.users?.phone}
+                        <PhoneNumberAction
+                          phone={item.users?.phone}
+                          emptyLabel="-"
+                        />
                       </td>
 
                       <td className="px-6 py-4 text-slate-700">
@@ -4749,7 +4784,10 @@ export function DashboardTabs({
                       </td>
 
                       <td className="px-6 py-4 text-slate-700">
-                        {item.exchanged_user?.phone ?? "-"}
+                        <PhoneNumberAction
+                          phone={item.exchanged_user?.phone}
+                          emptyLabel="-"
+                        />
                       </td>
 
                       <td className="px-6 py-4 text-slate-700">
@@ -5227,8 +5265,14 @@ export function DashboardTabs({
                             <p className="font-semibold text-slate-900">
                               {name}
                             </p>
-                            <p className="text-xs text-slate-500">
-                              {req.users?.phone || "—"}
+                            <p
+                              className="text-xs text-slate-500"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <PhoneNumberAction
+                                phone={req.users?.phone}
+                                emptyLabel="—"
+                              />
                             </p>
                           </td>
                           <td className="px-4 py-3 text-slate-700">
@@ -5334,8 +5378,14 @@ export function DashboardTabs({
                             <p className="font-semibold text-slate-900">
                               {name}
                             </p>
-                            <p className="text-xs text-slate-500">
-                              {vehicle.users?.phone || "—"}
+                            <p
+                              className="text-xs text-slate-500"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <PhoneNumberAction
+                                phone={vehicle.users?.phone}
+                                emptyLabel="—"
+                              />
                             </p>
                           </td>
                           <td className="px-4 py-3 font-semibold tracking-wide text-slate-800">

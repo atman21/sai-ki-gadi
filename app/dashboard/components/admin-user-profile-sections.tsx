@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { formatDateTime } from "@/lib/format-datetime";
 
 /** Columns selected for Admin user detail / verification profile views. */
@@ -315,22 +316,29 @@ function ProfileField({
   value,
   className,
   valueClassName,
+  phone,
 }: {
   label: string;
   value: string;
   className?: string;
   valueClassName?: string;
+  /** When set, render Call / WhatsApp actions for this phone value. */
+  phone?: string | null;
 }) {
   return (
     <div className={className}>
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
         {label}
       </p>
-      <p
+      <div
         className={`mt-1 text-sm font-semibold text-slate-900 ${valueClassName ?? ""}`}
       >
-        {value}
-      </p>
+        {phone !== undefined ? (
+          <PhoneNumberAction phone={phone} emptyLabel={EMPTY} />
+        ) : (
+          value
+        )}
+      </div>
     </div>
   );
 }
@@ -376,7 +384,11 @@ export function AdminUserProfileSections({
           value={displayValue(user.first_name)}
         />
         <ProfileField label="Last Name" value={displayValue(user.last_name)} />
-        <ProfileField label="Phone" value={displayValue(user.phone)} />
+        <ProfileField
+          label="Phone"
+          value={displayValue(user.phone)}
+          phone={user.phone}
+        />
         <ProfileField label="Email" value={displayValue(user.email)} />
         <ProfileField
           label="Blood Group"
@@ -473,6 +485,7 @@ export function AdminUserProfileSections({
         <ProfileField
           label="Reference Phone"
           value={displayValue(user.reference_phone)}
+          phone={user.reference_phone}
         />
         <ProfileField
           label="Reference Code"
@@ -485,6 +498,7 @@ export function AdminUserProfileSections({
         <ProfileField
           label="Reference 1 Mobile"
           value={displayValue(user.reference_1_mobile)}
+          phone={user.reference_1_mobile}
         />
         <div className="hidden lg:block" aria-hidden />
         <ProfileField
@@ -494,6 +508,7 @@ export function AdminUserProfileSections({
         <ProfileField
           label="Reference 2 Mobile"
           value={displayValue(user.reference_2_mobile)}
+          phone={user.reference_2_mobile}
         />
       </Section>
 

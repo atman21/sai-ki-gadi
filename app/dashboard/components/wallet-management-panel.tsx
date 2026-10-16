@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { AdminWalletPanel } from "@/app/dashboard/components/admin-wallet-panel";
+import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { PageHeader } from "@/components/admin/ui/page-header";
 
 type SearchUser = {
@@ -56,14 +57,6 @@ export function WalletManagementPanel() {
     }
   }
 
-  const selectedLabel = useMemo(() => {
-    if (!selected) return null;
-    const business = selected.business_name?.trim();
-    return `${selected.full_name}${selected.phone ? ` · ${selected.phone}` : ""}${
-      business ? ` · ${business}` : ""
-    }`;
-  }, [selected]);
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -110,13 +103,21 @@ export function WalletManagementPanel() {
               const isActive = selected?.id === user.id;
               return (
                 <li key={user.id}>
-                  <button
-                    type="button"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => {
                       setSelected(user);
                       setError(null);
                     }}
-                    className={`flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition ${
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelected(user);
+                        setError(null);
+                      }
+                    }}
+                    className={`flex w-full cursor-pointer flex-col items-start gap-0.5 px-4 py-3 text-left transition ${
                       isActive
                         ? "bg-slate-900 text-white"
                         : "bg-white text-slate-800 hover:bg-slate-50"
@@ -124,12 +125,31 @@ export function WalletManagementPanel() {
                   >
                     <span className="font-semibold">{user.full_name}</span>
                     <span
-                      className={`text-sm ${isActive ? "text-slate-300" : "text-slate-500"}`}
+                      className={`flex flex-wrap items-center gap-x-1.5 text-sm ${isActive ? "text-slate-300" : "text-slate-500"}`}
                     >
-                      {[user.phone, user.business_name].filter(Boolean).join(" · ") ||
-                        "No phone / business name"}
+                      {user.phone ? (
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <PhoneNumberAction
+                            phone={user.phone}
+                            triggerClassName={
+                              isActive
+                                ? "text-sky-200 hover:text-white"
+                                : undefined
+                            }
+                          />
+                        </span>
+                      ) : null}
+                      {user.phone && user.business_name ? (
+                        <span aria-hidden>·</span>
+                      ) : null}
+                      {user.business_name ? (
+                        <span>{user.business_name}</span>
+                      ) : null}
+                      {!user.phone && !user.business_name
+                        ? "No phone / business name"
+                        : null}
                     </span>
-                  </button>
+                  </div>
                 </li>
               );
             })}
@@ -140,7 +160,22 @@ export function WalletManagementPanel() {
       {selected ? (
         <div className="space-y-3">
           <p className="text-sm font-semibold text-slate-700">
-            Selected: <span className="text-slate-900">{selectedLabel}</span>
+            Selected:{" "}
+            <span className="inline-flex flex-wrap items-center gap-x-1.5 text-slate-900">
+              <span>{selected.full_name}</span>
+              {selected.phone ? (
+                <>
+                  <span aria-hidden>·</span>
+                  <PhoneNumberAction phone={selected.phone} />
+                </>
+              ) : null}
+              {selected.business_name?.trim() ? (
+                <>
+                  <span aria-hidden>·</span>
+                  <span>{selected.business_name.trim()}</span>
+                </>
+              ) : null}
+            </span>
           </p>
           <AdminWalletPanel key={selected.id} userId={selected.id} />
         </div>
