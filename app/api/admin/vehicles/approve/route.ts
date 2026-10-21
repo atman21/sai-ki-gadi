@@ -1,37 +1,18 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
+import { writeAdminAuditLog, clientMetaFromRequest } from "@/lib/admin-audit";
 
 type Body = {
   vehicleId?: string;
 };
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required to approve vehicles.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminPermission("vehicles.approve", {
+    request,
+    auditModule: "vehicles",
+  });
+  if (!gate.ok) return gate.response;
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const vehicleId = body.vehicleId?.trim() ?? "";
@@ -42,23 +23,43 @@ export async function POST(request: Request) {
     );
   }
 
-  const { error } = await supabaseAdmin
+  const actorLabel =
+    gate.actor.displayName || gate.actor.username || "admin";
+  const nowIso = new Date().toISOString();
+
+  const { error } = await gate.supabase
     .from("user_vehicles")
     .update({
       verification_status: "approved",
       rejection_reason: null,
-      reviewed_at: new Date().toISOString(),
-      reviewed_by: "admin",
+      reviewed_at: nowIso,
+      reviewed_by: actorLabel,
     })
     .eq("id", vehicleId)
     .eq("verification_status", "pending");
 
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message },
+      { ok: false, error: safeErrorMessage(error, "Approval failed.") },
       { status: 400 },
     );
   }
 
-  return NextResponse.json({ ok: true });
+  void writeAdminAuditLog({
+    actor: gate.actor,
+    action: "vehicle_approved",
+    module: "vehicles",
+    description: `Vehicle ${vehicleId} approved by ${actorLabel}`,
+    success: true,
+    resourceType: "user_vehicle",
+    resourceId: vehicleId,
+    afterData: {
+      verification_status: "approved",
+      reviewed_by: actorLabel,
+      reviewed_at: nowIso,
+    },
+    ...clientMetaFromRequest(request),
+  });
+
+  return NextResponse.json({ ok: true, reviewedBy: actorLabel });
 }

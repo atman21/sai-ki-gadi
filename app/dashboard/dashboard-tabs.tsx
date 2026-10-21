@@ -33,6 +33,11 @@ import { WalletManagementPanel } from "./components/wallet-management-panel";
 import { AdminNavIcon } from "./admin-nav-icons";
 import { FareOverrideRequestsPanel } from "@/components/admin/fare-override-requests-panel";
 import { ActiveFareOverridesPanel } from "@/components/admin/active-fare-overrides-panel";
+import { AdminUsersPanel } from "@/components/admin/admin-users-panel";
+import { AdminRolesPanel } from "@/components/admin/admin-roles-panel";
+import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
+import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
+import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
@@ -421,7 +426,10 @@ type TabKey =
   | "about-us"
   | "in-app-popups"
   | "wallet-management"
-  | "membership-management";
+  | "membership-management"
+  | "admin-users"
+  | "admin-roles"
+  | "audit-logs";
 
 const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "overview",
@@ -446,6 +454,9 @@ const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "in-app-popups",
   "wallet-management",
   "membership-management",
+  "admin-users",
+  "admin-roles",
+  "audit-logs",
 ]);
 
 function parseTabKey(value: string | null | undefined): TabKey {
@@ -576,6 +587,7 @@ export function DashboardTabs({
 }: DashboardTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const adminAccess = useAdminAccessOptional();
   const [activeTab, setActiveTab] = useState<TabKey>(() =>
     parseTabKey(searchParams.get("tab")),
   );
@@ -2010,6 +2022,14 @@ export function DashboardTabs({
           { key: "birthday-date" as TabKey, label: "Birthday" },
         ],
       },
+      {
+        title: "Administration",
+        items: [
+          { key: "admin-users" as TabKey, label: "Admin Users" },
+          { key: "admin-roles" as TabKey, label: "Roles" },
+          { key: "audit-logs" as TabKey, label: "Audit Logs" },
+        ],
+      },
     ],
     [
       cities.length,
@@ -2028,6 +2048,32 @@ export function DashboardTabs({
       winnerUser.length,
     ],
   );
+
+  const filteredNavGroups = useMemo(() => {
+    // Until /api/admin/me loads (or provider missing), show full nav to avoid flash-lockout.
+    if (!adminAccess || adminAccess.loading || !adminAccess.me) {
+      return navGroups;
+    }
+    return navGroups
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => {
+          const required = TAB_PERMISSION_MAP[item.key];
+          if (!required) return true;
+          return adminAccess.can(required);
+        }),
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [adminAccess, navGroups]);
+
+  // Redirect away from tabs the user cannot access once permissions load.
+  useEffect(() => {
+    if (!adminAccess || adminAccess.loading || !adminAccess.me) return;
+    const required = TAB_PERMISSION_MAP[activeTab];
+    if (required && !adminAccess.can(required)) {
+      selectTab("overview");
+    }
+  }, [activeTab, adminAccess, selectTab]);
 
   const logout = async () => {
     await fetch("/api/logout", { method: "POST" });
@@ -2819,7 +2865,7 @@ export function DashboardTabs({
         </div>
 
         <nav className="space-y-4" aria-label="Admin modules">
-          {navGroups.map((group) => (
+          {filteredNavGroups.map((group) => (
             <div key={group.title}>
               <h2 className="admin-sidebar-group-title mb-1.5 px-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--admin-text-faint)]">
                 {group.title}
@@ -5591,6 +5637,12 @@ export function DashboardTabs({
         <FareOverrideRequestsPanel />
       ) : activeTab === "active-fare-overrides" ? (
         <ActiveFareOverridesPanel />
+      ) : activeTab === "admin-users" ? (
+        <AdminUsersPanel />
+      ) : activeTab === "admin-roles" ? (
+        <AdminRolesPanel />
+      ) : activeTab === "audit-logs" ? (
+        <AuditLogsPanel />
       ) : activeTab === "about-us" ? (
         <AboutUsAdminPanel />
       ) : activeTab === "wallet-management" ? (

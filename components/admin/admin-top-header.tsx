@@ -7,6 +7,7 @@ import { AdminFontSizeControl } from "@/components/admin-font-size-control";
 import { AdminLiveStatus } from "@/components/admin/admin-live-status";
 import { AdminNotificationsBell } from "@/components/admin-notifications-bell";
 import { openAdminCommandPalette } from "@/components/admin/command-palette";
+import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
 
 export function AdminTopHeader({
   onToggleNav,
@@ -14,8 +15,14 @@ export function AdminTopHeader({
   onToggleNav?: () => void;
 }) {
   const router = useRouter();
+  const adminAccess = useAdminAccessOptional();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const actorLabel =
+    adminAccess?.me?.displayName ||
+    adminAccess?.me?.username ||
+    "Admin";
+  const actorInitial = actorLabel.trim().charAt(0).toUpperCase() || "A";
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -85,9 +92,11 @@ export function AdminTopHeader({
           aria-expanded={menuOpen}
         >
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--admin-primary)] text-[10px] font-bold text-white">
-            A
+            {actorInitial}
           </span>
-          <span className="hidden sm:inline">Admin</span>
+          <span className="hidden max-w-[9rem] truncate sm:inline">
+            {actorLabel}
+          </span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path d="m6 9 6 6 6-6" />
           </svg>

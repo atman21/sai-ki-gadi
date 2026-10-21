@@ -1,37 +1,18 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
+import { writeAdminAuditLog, clientMetaFromRequest } from "@/lib/admin-audit";
 
 type Body = {
   requestId?: string;
 };
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required to approve requests.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminPermission("profile_changes.approve", {
+    request,
+    auditModule: "profile_changes",
+  });
+  if (!gate.ok) return gate.response;
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const requestId = body.requestId?.trim() ?? "";
@@ -42,17 +23,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const { error } = await supabaseAdmin.rpc("approve_profile_change_request", {
+  const actorLabel =
+    gate.actor.displayName || gate.actor.username || "admin";
+
+  const { error } = await gate.supabase.rpc("approve_profile_change_request", {
     p_request_id: requestId,
-    p_reviewed_by: "admin",
+    p_reviewed_by: actorLabel,
   });
 
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message },
+      { ok: false, error: safeErrorMessage(error, "Approval failed.") },
       { status: 400 },
     );
   }
 
-  return NextResponse.json({ ok: true });
+  void writeAdminAuditLog({
+    actor: gate.actor,
+    action: "profile_change_approved",
+    module: "profile_changes",
+    description: `Profile change request ${requestId} approved by ${actorLabel}`,
+    success: true,
+    resourceType: "profile_change_request",
+    resourceId: requestId,
+    ...clientMetaFromRequest(request),
+  });
+
+  return NextResponse.json({ ok: true, reviewedBy: actorLabel });
 }
