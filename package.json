@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:admin-helpers": "node scripts/verify-admin-feature-helpers.mjs"
+    "test:admin-helpers": "node scripts/verify-admin-feature-helpers.mjs",
+    "test:booking-priority": "node --experimental-strip-types scripts/verify-booking-priority-settings.mjs"
   },
   "dependencies": {
     "@google-cloud/text-to-speech": "^6.4.1",

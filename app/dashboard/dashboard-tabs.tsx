@@ -38,6 +38,11 @@ import { AdminRolesPanel } from "@/components/admin/admin-roles-panel";
 import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
 import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
 import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
+import {
+  PRIORITY_DURATION_ERROR,
+  bookingPriorityTimeline,
+  isWholePriorityMinutes,
+} from "@/lib/booking-priority-settings";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
@@ -307,9 +312,9 @@ type FraudReport = {
   } | null;
 };
 
-/** Legacy column names mapped in UI as Diamond / Gold / Silver. */
+/** Legacy column names. Booking access uses Diamond and Gold only. */
 type PrioritySettings = {
-  /** Silver Priority Duration */
+  /** Legacy column. Not used for booking access. */
   matching_platinum_minutes: number;
   /** Diamond Priority Duration */
   all_platinum_minutes: number;
@@ -840,9 +845,8 @@ export function DashboardTabs({
     setSliderList(sliders);
   }, [sliders]);
 
-  // UI labels: Diamond / Gold / Silver — DB columns stay legacy names.
-  // all_platinum_minutes → Diamond, all_gold_minutes → Gold,
-  // matching_platinum_minutes → Silver
+  // all_platinum_minutes → Diamond, all_gold_minutes → Gold.
+  // matching_platinum_minutes is retained and is not a booking window.
   const [diamondMinutes, setDiamondMinutes] = useState(
     String(prioritySettings?.all_platinum_minutes ?? 4),
   );
@@ -1140,24 +1144,17 @@ export function DashboardTabs({
     }
   }
 
-  const diamondPreview = Number(diamondMinutes) || 0;
-  const goldPreview = Number(goldMinutes) || 0;
-  const silverPreview = Number(silverMinutes) || 0;
-  const everyoneAfterMinutes = diamondPreview + goldPreview + silverPreview;
+  const timeline = bookingPriorityTimeline(
+    Number(diamondMinutes) || 0,
+    Number(goldMinutes) || 0,
+  );
 
   async function savePrioritySettings() {
     const diamond = Number(diamondMinutes);
     const gold = Number(goldMinutes);
-    const silver = Number(silverMinutes);
 
-    if (
-      ![diamond, gold, silver].every(
-        (n) => Number.isInteger(n) && n > 0 && n <= 1440,
-      )
-    ) {
-      setPrioritySettingsMessage(
-        "Each duration must be a whole number between 1 and 1440 minutes.",
-      );
+    if (!isWholePriorityMinutes(diamond) || !isWholePriorityMinutes(gold)) {
+      setPrioritySettingsMessage(PRIORITY_DURATION_ERROR);
       return;
     }
 
@@ -1169,10 +1166,8 @@ export function DashboardTabs({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // Legacy column names — semantics: Diamond / Gold / Silver
           all_platinum_minutes: diamond,
           all_gold_minutes: gold,
-          matching_platinum_minutes: silver,
         }),
       });
       const payload = await response.json();
@@ -1185,12 +1180,9 @@ export function DashboardTabs({
       setDiamondMinutes(String(payload.all_platinum_minutes));
       setGoldMinutes(String(payload.all_gold_minutes));
       setSilverMinutes(String(payload.matching_platinum_minutes));
-      const total =
-        payload.all_platinum_minutes +
-        payload.all_gold_minutes +
-        payload.matching_platinum_minutes;
+      const total = payload.all_platinum_minutes + payload.all_gold_minutes;
       setPrioritySettingsMessage(
-        `Saved. Timeline: Diamond ${payload.all_platinum_minutes} + Gold ${payload.all_gold_minutes} + Silver ${payload.matching_platinum_minutes} = ${total} minutes to open access.`,
+        `Saved. Diamond ${payload.all_platinum_minutes} min, then Gold ${payload.all_gold_minutes} min. Everyone after ${total} min.`,
       );
     } catch {
       setPrioritySettingsMessage("Failed to save settings.");
@@ -5095,9 +5087,9 @@ export function DashboardTabs({
             Priority Timeline Settings
           </h2>
           <p className="mt-2 text-sm text-slate-600">
-            Durations control Requirement feed access windows in this order:
-            Diamond → Gold → Silver → Everyone. Changes apply on the next feed
-            load — no app deploy required.
+            Durations control Single and Exchange booking access in this order:
+            Diamond → Gold → Everyone. Silver members open with everyone.
+            Changes apply to existing bookings on the next feed load.
           </p>
 
           <div className="mt-6 grid gap-5 sm:grid-cols-3">
@@ -5147,19 +5139,18 @@ export function DashboardTabs({
 
             <div>
               <label className="mb-1 block text-sm font-semibold text-slate-700">
-                Silver Priority Duration
+                Silver priority duration
               </label>
               <p className="mb-2 text-xs text-slate-500">
-                trip_points &gt; 0 (Gold membership not required)
+                Not used for booking access. Silver and Regular open together
+                after Gold. The stored value is kept for compatibility.
               </p>
               <div className="flex items-center gap-2">
                 <input
                   type="number"
-                  min={1}
-                  max={1440}
                   value={silverMinutes}
-                  onChange={(e) => setSilverMinutes(e.target.value)}
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
+                  disabled
+                  className="h-12 w-full rounded-xl border border-slate-200 bg-slate-100 px-4 text-sm text-slate-500 outline-none"
                 />
                 <span className="text-sm font-medium text-slate-500">
                   Minutes
@@ -5171,10 +5162,12 @@ export function DashboardTabs({
           <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
             <p className="font-semibold text-slate-900">Preview timeline</p>
             <ol className="mt-2 list-decimal space-y-1 pl-5">
-              <li>0–{diamondPreview} min → Diamond</li>
-              <li>Next {goldPreview} min → Gold</li>
-              <li>Next {silverPreview} min → Silver</li>
-              <li>After {everyoneAfterMinutes} min → Everyone</li>
+              <li>Before {timeline.goldStartsAtMinute} min → Diamond</li>
+              <li>
+                At {timeline.goldStartsAtMinute} min, Gold for{" "}
+                {timeline.goldMinutes} min
+              </li>
+              <li>At {timeline.everyoneStartsAtMinute} min → Everyone</li>
             </ol>
           </div>
 

@@ -1,9 +1,10 @@
 import { requireAdminApi } from "@/lib/admin-api";
 import { NextResponse } from "next/server";
 
+import { buildPrioritySettingsUpdate } from "@/lib/booking-priority-settings";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-/** Legacy column names: all_platinum=Diamond, all_gold=Gold, matching_platinum=Silver */
+/** Legacy column names: all_platinum=Diamond, all_gold=Gold. matching_platinum is stored but ignored for booking access. */
 export type RequirementPrioritySettings = {
   id: number;
   matching_platinum_minutes: number;
@@ -55,35 +56,46 @@ export async function PUT(req: Request) {
   try {
     const body = await req.json();
 
-    const matching = Number(body.matching_platinum_minutes);
     const platinum = Number(body.all_platinum_minutes);
     const gold = Number(body.all_gold_minutes);
 
-    if (
-      ![matching, platinum, gold].every(
-        (n) => Number.isInteger(n) && n > 0 && n <= 1440,
-      )
-    ) {
+    const { data: existing, error: existingError } = await supabaseAdmin
+      .from("requirement_priority_settings")
+      .select("matching_platinum_minutes")
+      .eq("id", 1)
+      .maybeSingle();
+
+    if (existingError) {
+      return NextResponse.json({ error: existingError.message }, { status: 500 });
+    }
+
+    if (!existing) {
       return NextResponse.json(
         {
           error:
-            "Each duration must be a whole number of minutes between 1 and 1440.",
+            "Priority settings row not found. Apply migration 027_requirement_priority_settings.sql.",
         },
-        { status: 400 },
+        { status: 404 },
       );
+    }
+
+    const update = buildPrioritySettingsUpdate({
+      diamondMinutes: platinum,
+      goldMinutes: gold,
+      existingLegacySilverMinutes: existing.matching_platinum_minutes,
+    });
+    if (!update.ok) {
+      return NextResponse.json({ error: update.error }, { status: 400 });
     }
 
     const { data, error } = await supabaseAdmin
       .from("requirement_priority_settings")
-      .upsert(
-        {
-          id: 1,
-          matching_platinum_minutes: matching,
-          all_platinum_minutes: platinum,
-          all_gold_minutes: gold,
-        },
-        { onConflict: "id" },
-      )
+      .update({
+        all_platinum_minutes: update.row.all_platinum_minutes,
+        all_gold_minutes: update.row.all_gold_minutes,
+        matching_platinum_minutes: update.row.matching_platinum_minutes,
+      })
+      .eq("id", 1)
       .select(
         "id, matching_platinum_minutes, all_platinum_minutes, all_gold_minutes, updated_at",
       )
