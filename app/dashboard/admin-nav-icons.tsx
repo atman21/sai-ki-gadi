@@ -22,7 +22,10 @@ export type AdminNavTabKey =
   | "about-us"
   | "in-app-popups"
   | "wallet-management"
-  | "membership-management";
+  | "membership-management"
+  | "admin-users"
+  | "admin-roles"
+  | "audit-logs";
 
 type NavIconConfig = {
   bgClass: string;
@@ -300,6 +303,40 @@ const NAV_ICON_CONFIG: Record<AdminNavTabKey, NavIconConfig> = {
       <NavSvg className="h-4 w-4">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
         <path d="m9 12 2 2 4-4" />
+      </NavSvg>
+    ),
+  },
+  "admin-users": {
+    bgClass: "bg-violet-100",
+    colorClass: "text-violet-600",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </NavSvg>
+    ),
+  },
+  "admin-roles": {
+    bgClass: "bg-fuchsia-100",
+    colorClass: "text-fuchsia-600",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+      </NavSvg>
+    ),
+  },
+  "audit-logs": {
+    bgClass: "bg-stone-100",
+    colorClass: "text-stone-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <path d="M14 2v6h6" />
+        <path d="M16 13H8" />
+        <path d="M16 17H8" />
+        <path d="M10 9H8" />
       </NavSvg>
     ),
   },

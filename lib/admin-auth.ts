@@ -2,7 +2,18 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const ADMIN_SESSION_COOKIE = "merigaadi_admin_session";
 
-const SESSION_MAX_AGE_MS = 60 * 60 * 24 * 7 * 1000;
+const SESSION_MAX_AGE_MS = 60 * 60 * 8 * 1000; // 8 hours (was 7 days)
+
+export type AdminSessionPayload = {
+  /** Present for DB-backed admin panel users. */
+  adminId?: string;
+  username: string;
+  displayName?: string;
+  isSuperAdmin?: boolean;
+  /** Legacy marker — always "admin" for cookie compatibility. */
+  role: "admin";
+  exp: number;
+};
 
 /** Prefer env in production. Hardcoded fallback is documented as a known risk. */
 export function getAdminUsername(): string {
@@ -27,26 +38,44 @@ export const ADMIN_USERNAME = getAdminUsername();
 /** @deprecated Use getAdminPassword() — kept for any residual imports. */
 export const ADMIN_PASSWORD = getAdminPassword();
 
-export function createAdminSessionValue(): string {
+export function createAdminSessionValue(
+  input?: Partial<
+    Pick<
+      AdminSessionPayload,
+      "adminId" | "username" | "displayName" | "isSuperAdmin"
+    >
+  >,
+): string {
   const exp = Date.now() + SESSION_MAX_AGE_MS;
-  const payload = Buffer.from(
-    JSON.stringify({ role: "admin", exp }),
-    "utf8",
-  ).toString("base64url");
+  const payloadObj: AdminSessionPayload = {
+    role: "admin",
+    exp,
+    username: input?.username?.trim() || getAdminUsername(),
+    displayName: input?.displayName?.trim() || undefined,
+    isSuperAdmin: input?.isSuperAdmin === true,
+  };
+  if (input?.adminId) {
+    payloadObj.adminId = input.adminId;
+  }
+  const payload = Buffer.from(JSON.stringify(payloadObj), "utf8").toString(
+    "base64url",
+  );
   const sig = createHmac("sha256", getSessionSecret())
     .update(payload)
     .digest("base64url");
   return `${payload}.${sig}`;
 }
 
-export function isValidAdminSessionValue(value: string | undefined): boolean {
-  if (!value) return false;
+export function parseAdminSessionValue(
+  value: string | undefined,
+): AdminSessionPayload | null {
+  if (!value) return null;
 
   const parts = value.split(".");
-  if (parts.length !== 2) return false;
+  if (parts.length !== 2) return null;
 
   const [payload, sig] = parts;
-  if (!payload || !sig) return false;
+  if (!payload || !sig) return null;
 
   const expected = createHmac("sha256", getSessionSecret())
     .update(payload)
@@ -55,22 +84,30 @@ export function isValidAdminSessionValue(value: string | undefined): boolean {
   try {
     const a = Buffer.from(sig);
     const b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   } catch {
-    return false;
+    return null;
   }
 
   try {
     const data = JSON.parse(
       Buffer.from(payload, "base64url").toString("utf8"),
-    ) as { role?: string; exp?: number };
-    if (data.role !== "admin") return false;
-    if (typeof data.exp !== "number" || Date.now() > data.exp) return false;
+    ) as AdminSessionPayload;
+    if (data.role !== "admin") return null;
+    if (typeof data.exp !== "number" || Date.now() > data.exp) return null;
+    if (!data.username || typeof data.username !== "string") {
+      // Legacy cookies had only { role, exp }
+      data.username = getAdminUsername();
+      data.isSuperAdmin = true;
+    }
+    return data;
   } catch {
-    return false;
+    return null;
   }
+}
 
-  return true;
+export function isValidAdminSessionValue(value: string | undefined): boolean {
+  return parseAdminSessionValue(value) != null;
 }
 
 export const ADMIN_SESSION_MAX_AGE_SECONDS = SESSION_MAX_AGE_MS / 1000;

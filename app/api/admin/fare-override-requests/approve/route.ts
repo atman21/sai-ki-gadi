@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+import { requireAdminPermission } from "@/lib/admin-api";
+import { writeAdminAuditLog, clientMetaFromRequest } from "@/lib/admin-audit";
 
 type Body = {
   requestId?: string;
@@ -17,24 +12,11 @@ type Body = {
 };
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminPermission("fare_overrides.manage", {
+    request,
+    auditModule: "fare_overrides",
+  });
+  if (!gate.ok) return gate.response;
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const requestId = body.requestId?.trim() ?? "";
@@ -86,12 +68,15 @@ export async function POST(request: Request) {
     }
   }
 
-  const { data, error } = await supabaseAdmin.rpc(
+  const actorLabel =
+    gate.actor.displayName || gate.actor.username || "admin";
+
+  const { data, error } = await gate.supabase.rpc(
     "approve_fare_override_request",
     {
       p_request_id: requestId,
       p_allowed_min_fare: allowedMinFare,
-      p_reviewed_by: "admin",
+      p_reviewed_by: actorLabel,
       p_expires_at: expiresAt,
       p_permanent: permanent,
     },
@@ -104,5 +89,17 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, data });
+  void writeAdminAuditLog({
+    actor: gate.actor,
+    action: "fare_override_approved",
+    module: "fare_overrides",
+    description: `Fare override request ${requestId} approved by ${actorLabel}`,
+    success: true,
+    resourceType: "fare_override_request",
+    resourceId: requestId,
+    afterData: { allowedMinFare, permanent, expiresAt },
+    ...clientMetaFromRequest(request),
+  });
+
+  return NextResponse.json({ ok: true, data, reviewedBy: actorLabel });
 }
