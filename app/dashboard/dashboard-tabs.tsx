@@ -36,6 +36,7 @@ import { ActiveFareOverridesPanel } from "@/components/admin/active-fare-overrid
 import { AdminUsersPanel } from "@/components/admin/admin-users-panel";
 import { AdminRolesPanel } from "@/components/admin/admin-roles-panel";
 import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
+import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
 import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
