@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { requireAdminApi } from "@/lib/admin-api";
+import {
+  clientMetaFromRequest,
+  recordFailure,
+  recordSuccess,
+} from "@/lib/admin-audit";
 
 const IDENTITY_BUCKET = "identity-documents";
 
@@ -34,10 +37,9 @@ function isAllowedPathField(value: string): value is AllowedPathField {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
+  const supabaseAdmin = gate.supabase;
 
   const body = (await request.json().catch(() => ({}))) as DeletePayload;
   const userId = body.userId?.trim() ?? "";
@@ -47,6 +49,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Invalid request payload." }, { status: 400 });
   }
 
+  // Never log storage paths for identity documents — only user + field name.
+  const audit = {
+    actor: gate.actor,
+    module: "members",
+    resourceType: "user_identity_document",
+    resourceId: `${userId}:${pathField}`,
+    relatedUserId: userId,
+    metadata: { userId, pathField },
+    ...clientMetaFromRequest(request),
+  };
+
   const { data: row, error: readError } = await supabaseAdmin
     .from("user_identity_documents")
     .select(pathField)
@@ -54,12 +67,24 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (readError) {
+    void recordFailure({
+      ...audit,
+      action: "identity_document_deleted",
+      description: `Failed to read identity document (${pathField}) for member ${userId}`,
+      reason: readError.message,
+    });
     return NextResponse.json({ ok: false, error: readError.message }, { status: 400 });
   }
 
   const rowRecord = row as Record<string, unknown> | null;
   const currentPath = rowRecord?.[pathField];
   if (typeof currentPath !== "string" || currentPath.length === 0) {
+    void recordFailure({
+      ...audit,
+      action: "identity_document_deleted",
+      description: `Identity document (${pathField}) not found for member ${userId}`,
+      reason: "Document path not found.",
+    });
     return NextResponse.json({ ok: false, error: "Document path not found." }, { status: 404 });
   }
 
@@ -68,6 +93,12 @@ export async function POST(request: Request) {
     .remove([currentPath]);
 
   if (deleteStorageError) {
+    void recordFailure({
+      ...audit,
+      action: "identity_document_deleted",
+      description: `Failed to remove identity document (${pathField}) from storage for member ${userId}`,
+      reason: deleteStorageError.message,
+    });
     return NextResponse.json({ ok: false, error: deleteStorageError.message }, { status: 400 });
   }
 
@@ -83,8 +114,22 @@ export async function POST(request: Request) {
     .eq("user_id", userId);
 
   if (updateError) {
+    void recordFailure({
+      ...audit,
+      action: "identity_document_deleted",
+      outcome: "partial",
+      description: `Identity document (${pathField}) removed from storage but database update failed for member ${userId}`,
+      reason: updateError.message,
+    });
     return NextResponse.json({ ok: false, error: updateError.message }, { status: 400 });
   }
+
+  await recordSuccess({
+    ...audit,
+    action: "identity_document_deleted",
+    description: `Identity document (${pathField}) deleted for member ${userId}`,
+    changedFields: Object.keys(updatePayload),
+  });
 
   return NextResponse.json({ ok: true });
 }

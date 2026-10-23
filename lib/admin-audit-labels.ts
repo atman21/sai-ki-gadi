@@ -1,0 +1,75 @@
+/** Human-readable labels for known action keys (fallback: title-case snake). */
+export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  login_success: "Login Success",
+  login_failed: "Login Failed",
+  login_rate_limited: "Login Rate Limited",
+  logout: "Logout",
+  permission_denied: "Permission Denied",
+  member_approved: "Driver Verification Approved",
+  member_approve_failed: "Driver Verification Approve Failed",
+  member_rejected: "Driver Verification Rejected",
+  member_reject_failed: "Driver Verification Reject Failed",
+  user_updated: "Member Updated",
+  user_deleted: "Member Deleted",
+  user_birth_date_updated: "Birth Date Updated",
+  wallet_transaction_posted: "Wallet Transaction Posted",
+  wallet_transaction_failed: "Wallet Transaction Failed",
+  memberships_expired: "Memberships Expired",
+  vehicle_approved: "Vehicle Approved",
+  vehicle_rejected: "Vehicle Rejected",
+  profile_change_approved: "Profile Change Approved",
+  profile_change_rejected: "Profile Change Rejected",
+  fare_override_approved: "Fare Override Approved",
+  fare_override_rejected: "Fare Override Rejected",
+  user_fare_override_revoked: "Fare Override Revoked",
+  admin_user_created: "Admin User Created",
+  admin_user_updated: "Admin User Updated",
+  role_created: "Role Created",
+  role_updated: "Role Permission Changed",
+  fraud_report_created: "Fraud Report Created",
+  fraud_report_updated: "Fraud Report Updated",
+  fraud_report_deleted: "Fraud Report Deleted",
+  city_created: "City Created",
+  city_deleted: "City Deleted",
+  slider_created: "Slider Created",
+  slider_updated: "Slider Updated",
+  slider_deleted: "Slider Deleted",
+  sliders_reordered: "Sliders Reordered",
+  winner_created: "Winner Added",
+  winner_updated: "Winner Updated",
+  winner_deleted: "Winner Removed",
+  about_us_updated: "About Us Updated",
+  priority_settings_updated: "Priority Settings Updated",
+  announcement_created: "In-App Popup Created",
+  announcement_updated: "In-App Popup Updated",
+  announcement_published: "In-App Popup Published",
+  announcement_archived: "In-App Popup Deactivated",
+  announcement_duplicated: "In-App Popup Duplicated",
+  announcement_recipients_set: "In-App Popup Recipients Updated",
+  announcement_asset_uploaded: "Announcement Asset Uploaded",
+  minimum_fare_created: "Minimum Fare Created",
+  minimum_fare_updated: "Minimum Fare Updated",
+  minimum_fare_toggled: "Minimum Fare Toggled",
+  minimum_fare_deleted: "Minimum Fare Deleted",
+  birthday_notification_settings_updated:
+    "Birthday Notification Settings Updated",
+  birthday_notification_test_sent: "Birthday Notification Send Requested",
+  birthday_notification_test_failed: "Birthday Notification Send Failed",
+  lucky_draw_notification_settings_updated:
+    "Lucky Draw Notification Settings Updated",
+  lucky_draw_notification_test_sent: "Lucky Draw Notification Send Requested",
+  lucky_draw_notification_test_failed: "Lucky Draw Notification Send Failed",
+  identity_document_deleted: "Identity Document Deleted",
+  media_uploaded: "Media Uploaded",
+  admin_notifications_marked_read: "Admin Notifications Marked Read",
+  audit_logs_exported: "Audit Logs Exported",
+};
+
+export function auditActionLabel(action: string): string {
+  if (AUDIT_ACTION_LABELS[action]) return AUDIT_ACTION_LABELS[action];
+  return action
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}

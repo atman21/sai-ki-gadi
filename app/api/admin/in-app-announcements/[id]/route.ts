@@ -4,6 +4,7 @@ import {
   requireAdminApi,
   safeErrorMessage,
 } from "@/lib/in-app-announcements/admin-api";
+import { clientMetaFromRequest, recordChange, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { validateAnnouncementConfig } from "@/lib/in-app-announcements/types";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -42,6 +43,12 @@ export async function GET(_request: Request, context: Ctx) {
     item: data,
     recipientCount: count ?? 0,
   });
+}
+
+function truncateAuditValue(value: unknown): unknown {
+  return typeof value === "string" && value.length > 300
+    ? `${value.slice(0, 300)}…`
+    : value;
 }
 
 export async function PUT(request: Request, context: Ctx) {
@@ -137,12 +144,61 @@ export async function PUT(request: Request, context: Ctx) {
       .select("*")
       .single();
 
+    const existingRow = existing as Record<string, unknown>;
+    const changedFields = Object.keys(patch).filter(
+      (key) =>
+        JSON.stringify(existingRow[key] ?? null) !==
+        JSON.stringify(patch[key] ?? null),
+    );
+    const becamePublished =
+      patch.status === "active" && existingRow.status !== "active";
+    const auditAction = becamePublished
+      ? "announcement_published"
+      : "announcement_updated";
+    const entityLabel = String(
+      (data as Record<string, unknown> | null)?.internal_name ??
+        existingRow.internal_name ??
+        id,
+    );
+
     if (error) {
+      void recordFailure({
+        actor: auth.actor,
+        action: auditAction,
+        module: "announcements",
+        description: `Failed to ${becamePublished ? "publish" : "update"} in-app popup "${entityLabel}"`,
+        resourceType: "in_app_announcement",
+        resourceId: id,
+        entityLabel,
+        reason: error.message,
+        changedFields,
+        ...clientMetaFromRequest(request),
+      });
       return NextResponse.json(
         { ok: false, error: error.message },
         { status: 400 },
       );
     }
+
+    void recordChange({
+      actor: auth.actor,
+      action: auditAction,
+      module: "announcements",
+      description: becamePublished
+        ? `In-app popup "${entityLabel}" published`
+        : `In-app popup "${entityLabel}" updated`,
+      resourceType: "in_app_announcement",
+      resourceId: id,
+      entityLabel,
+      changedFields,
+      beforeData: Object.fromEntries(
+        changedFields.map((key) => [key, truncateAuditValue(existingRow[key])]),
+      ),
+      afterData: Object.fromEntries(
+        changedFields.map((key) => [key, truncateAuditValue(patch[key])]),
+      ),
+      ...clientMetaFromRequest(request),
+    });
 
     return NextResponse.json({ ok: true, item: data });
   } catch (error) {
@@ -156,7 +212,7 @@ export async function PUT(request: Request, context: Ctx) {
   }
 }
 
-export async function DELETE(_request: Request, context: Ctx) {
+export async function DELETE(request: Request, context: Ctx) {
   const auth = await requireAdminApi();
   if (!auth.ok) return auth.response;
 
@@ -174,11 +230,33 @@ export async function DELETE(_request: Request, context: Ctx) {
     .single();
 
   if (error) {
+    void recordFailure({
+      actor: auth.actor,
+      action: "announcement_archived",
+      module: "announcements",
+      description: `Failed to archive in-app popup ${id}`,
+      resourceType: "in_app_announcement",
+      resourceId: id,
+      reason: error.message,
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json(
       { ok: false, error: error.message },
       { status: 400 },
     );
   }
+
+  void recordSuccess({
+    actor: auth.actor,
+    action: "announcement_archived",
+    module: "announcements",
+    description: `In-app popup ${id} archived and unpublished`,
+    resourceType: "in_app_announcement",
+    resourceId: id,
+    changedFields: ["archived_at", "status"],
+    afterData: { status: "unpublished", archived: true },
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true, item: data });
 }

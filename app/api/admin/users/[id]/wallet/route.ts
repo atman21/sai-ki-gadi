@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
 type WalletTransactionType = "credit" | "debit";
 
@@ -147,11 +148,56 @@ export async function POST(
     p_created_by: "admin_panel",
   });
 
+  const walletMeta = {
+    transaction_type: transactionType,
+    amount,
+    source,
+    reference_type: referenceType,
+    reference_id: referenceId,
+    remarks,
+  };
+
   if (error) {
     const message = safeErrorMessage(error, "Unable to post wallet transaction.");
     const status = /insufficient wallet balance/i.test(error.message ?? "") ? 409 : 400;
+    await recordFailure({
+      actor: gate.actor,
+      action: "wallet_transaction_failed",
+      module: "wallet",
+      description: `Wallet ${transactionType} of ${amount} failed for member ${id}`,
+      resourceType: "wallet_transaction",
+      resourceId: id,
+      relatedUserId: id,
+      reason: message,
+      metadata: walletMeta,
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json({ ok: false, error: message }, { status });
   }
+
+  const resultRecord =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : null;
+  const transactionId =
+    resultRecord && resultRecord.id != null
+      ? String(resultRecord.id)
+      : resultRecord && resultRecord.transaction_id != null
+        ? String(resultRecord.transaction_id)
+        : id;
+
+  await recordSuccess({
+    actor: gate.actor,
+    action: "wallet_transaction_posted",
+    module: "wallet",
+    description: `Wallet ${transactionType} of ${amount} posted for member ${id}`,
+    resourceType: "wallet_transaction",
+    resourceId: transactionId,
+    relatedUserId: id,
+    afterData: resultRecord,
+    metadata: walletMeta,
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true, result: data });
 }

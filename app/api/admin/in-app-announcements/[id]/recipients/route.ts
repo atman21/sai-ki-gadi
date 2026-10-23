@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi } from "@/lib/in-app-announcements/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -56,7 +57,23 @@ export async function PUT(request: Request, context: Ctx) {
     .delete()
     .eq("announcement_id", id);
 
+  const recipientMeta = (extra?: Record<string, unknown>) => ({
+    recipientCount: userIds.length,
+    ...extra,
+  });
+
   if (delError) {
+    void recordFailure({
+      actor: auth.actor,
+      action: "announcement_recipients_set",
+      module: "announcements",
+      description: `Failed to update recipients for in-app popup ${id}`,
+      resourceType: "in_app_announcement",
+      resourceId: id,
+      reason: delError.message,
+      metadata: recipientMeta(),
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json(
       { ok: false, error: delError.message },
       { status: 400 },
@@ -64,6 +81,16 @@ export async function PUT(request: Request, context: Ctx) {
   }
 
   if (userIds.length === 0) {
+    void recordSuccess({
+      actor: auth.actor,
+      action: "announcement_recipients_set",
+      module: "announcements",
+      description: `Cleared recipients for in-app popup ${id}`,
+      resourceType: "in_app_announcement",
+      resourceId: id,
+      metadata: recipientMeta(),
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json({ ok: true, count: 0 });
   }
 
@@ -77,11 +104,33 @@ export async function PUT(request: Request, context: Ctx) {
     .insert(rows);
 
   if (insError) {
+    void recordFailure({
+      actor: auth.actor,
+      action: "announcement_recipients_set",
+      module: "announcements",
+      description: `Failed to update recipients for in-app popup ${id}`,
+      resourceType: "in_app_announcement",
+      resourceId: id,
+      reason: insError.message,
+      metadata: recipientMeta({ note: "Existing recipients were cleared before insert failed" }),
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json(
       { ok: false, error: insError.message },
       { status: 400 },
     );
   }
+
+  void recordSuccess({
+    actor: auth.actor,
+    action: "announcement_recipients_set",
+    module: "announcements",
+    description: `Set ${userIds.length} recipient(s) for in-app popup ${id}`,
+    resourceType: "in_app_announcement",
+    resourceId: id,
+    metadata: recipientMeta(),
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true, count: userIds.length });
 }

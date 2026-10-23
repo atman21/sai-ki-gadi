@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi } from "@/lib/in-app-announcements/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function POST(_request: Request, context: Ctx) {
+export async function POST(request: Request, context: Ctx) {
   const auth = await requireAdminApi();
   if (!auth.ok) return auth.response;
 
@@ -44,11 +45,34 @@ export async function POST(_request: Request, context: Ctx) {
     .single();
 
   if (insertError) {
+    void recordFailure({
+      actor: auth.actor,
+      action: "announcement_duplicated",
+      module: "announcements",
+      description: `Failed to duplicate in-app popup "${source.internal_name}"`,
+      resourceType: "in_app_announcement",
+      resourceId: id,
+      entityLabel: source.internal_name,
+      reason: insertError.message,
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json(
       { ok: false, error: insertError.message },
       { status: 400 },
     );
   }
+
+  void recordSuccess({
+    actor: auth.actor,
+    action: "announcement_duplicated",
+    module: "announcements",
+    description: `In-app popup "${source.internal_name}" duplicated`,
+    resourceType: "in_app_announcement",
+    resourceId: data?.id != null ? String(data.id) : undefined,
+    entityLabel: data?.internal_name ?? `${source.internal_name} (Copy)`,
+    metadata: { sourceAnnouncementId: id },
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true, item: data });
 }

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
+import { requireAdminApi } from "@/lib/admin-api";
 import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+  clientMetaFromRequest,
+  recordChange,
+  recordFailure,
+  recordSuccess,
+} from "@/lib/admin-audit";
 import { normalizeIndianStateName } from "@/lib/normalize-indian-state";
 import {
   isVehicleCategory,
@@ -47,24 +47,8 @@ function normalizeVehicleCategory(
 }
 
 export async function PUT(request: Request, context: Context) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
 
   const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as Body;
@@ -112,7 +96,13 @@ export async function PUT(request: Request, context: Context) {
     );
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data: before } = await gate.supabase
+    .from("route_minimum_fares")
+    .select("from_city, from_state, to_city, to_state, vehicle_category, minimum_fare, is_active")
+    .eq("id", id)
+    .maybeSingle();
+
+  const { data, error } = await gate.supabase
     .from("route_minimum_fares")
     .update({
       from_city,
@@ -127,8 +117,31 @@ export async function PUT(request: Request, context: Context) {
     .select("*")
     .single();
 
+  const afterData = {
+    from_city,
+    from_state,
+    to_city,
+    to_state,
+    vehicle_category: vehicle as string | null,
+    minimum_fare,
+    is_active: body.is_active !== false,
+  };
+  const routeLabel = `${from_city} → ${to_city} (${vehicle ?? "any vehicle"})`;
+
   if (error) {
     const msg = error.message.toLowerCase();
+    void recordFailure({
+      actor: gate.actor,
+      action: "minimum_fare_updated",
+      module: "fares",
+      description: `Failed to update minimum fare ${routeLabel}`,
+      resourceType: "route_minimum_fare",
+      resourceId: id,
+      entityLabel: routeLabel,
+      reason: error.message,
+      metadata: afterData,
+      ...clientMetaFromRequest(request),
+    });
     if (msg.includes("duplicate") || msg.includes("unique")) {
       return NextResponse.json(
         {
@@ -145,28 +158,30 @@ export async function PUT(request: Request, context: Context) {
     );
   }
 
+  void recordChange({
+    actor: gate.actor,
+    action: "minimum_fare_updated",
+    module: "fares",
+    description: `Minimum fare ${routeLabel} updated`,
+    resourceType: "route_minimum_fare",
+    resourceId: id,
+    entityLabel: routeLabel,
+    changedFields: Object.keys(afterData).filter(
+      (key) =>
+        JSON.stringify((before as Record<string, unknown> | null)?.[key] ?? null) !==
+        JSON.stringify((afterData as Record<string, unknown>)[key] ?? null),
+    ),
+    beforeData: before ?? null,
+    afterData,
+    ...clientMetaFromRequest(request),
+  });
+
   return NextResponse.json({ ok: true, data });
 }
 
 export async function PATCH(request: Request, context: Context) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
 
   const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as {
@@ -180,55 +195,107 @@ export async function PATCH(request: Request, context: Context) {
     );
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data: before } = await gate.supabase
+    .from("route_minimum_fares")
+    .select("from_city, to_city, vehicle_category, is_active")
+    .eq("id", id)
+    .maybeSingle();
+
+  const { data, error } = await gate.supabase
     .from("route_minimum_fares")
     .update({ is_active: body.is_active })
     .eq("id", id)
     .select("*")
     .single();
 
+  const toggleLabel = before
+    ? `${before.from_city} → ${before.to_city} (${before.vehicle_category ?? "any vehicle"})`
+    : id;
+
   if (error) {
+    void recordFailure({
+      actor: gate.actor,
+      action: "minimum_fare_toggled",
+      module: "fares",
+      description: `Failed to ${body.is_active ? "activate" : "deactivate"} minimum fare ${toggleLabel}`,
+      resourceType: "route_minimum_fare",
+      resourceId: id,
+      entityLabel: toggleLabel,
+      reason: error.message,
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json(
       { ok: false, error: error.message },
       { status: 400 },
     );
   }
+
+  void recordChange({
+    actor: gate.actor,
+    action: "minimum_fare_toggled",
+    module: "fares",
+    description: `Minimum fare ${toggleLabel} ${body.is_active ? "activated" : "deactivated"}`,
+    resourceType: "route_minimum_fare",
+    resourceId: id,
+    entityLabel: toggleLabel,
+    changedFields: ["is_active"],
+    beforeData: { is_active: before?.is_active ?? null },
+    afterData: { is_active: body.is_active },
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true, data });
 }
 
-export async function DELETE(_request: Request, context: Context) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+export async function DELETE(request: Request, context: Context) {
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
 
   const { id } = await context.params;
-  const { error } = await supabaseAdmin
+  const { data: before } = await gate.supabase
+    .from("route_minimum_fares")
+    .select("from_city, from_state, to_city, to_state, vehicle_category, minimum_fare, is_active")
+    .eq("id", id)
+    .maybeSingle();
+
+  const { error } = await gate.supabase
     .from("route_minimum_fares")
     .delete()
     .eq("id", id);
 
+  const deleteLabel = before
+    ? `${before.from_city} → ${before.to_city} (${before.vehicle_category ?? "any vehicle"})`
+    : id;
+
   if (error) {
+    void recordFailure({
+      actor: gate.actor,
+      action: "minimum_fare_deleted",
+      module: "fares",
+      description: `Failed to delete minimum fare ${deleteLabel}`,
+      resourceType: "route_minimum_fare",
+      resourceId: id,
+      entityLabel: deleteLabel,
+      reason: error.message,
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json(
       { ok: false, error: error.message },
       { status: 400 },
     );
   }
+
+  void recordSuccess({
+    actor: gate.actor,
+    action: "minimum_fare_deleted",
+    module: "fares",
+    description: `Minimum fare ${deleteLabel} deleted`,
+    resourceType: "route_minimum_fare",
+    resourceId: id,
+    entityLabel: deleteLabel,
+    beforeData: before ?? null,
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true });
 }

@@ -46,6 +46,8 @@ export const ADMIN_PERMISSIONS = [
   "roles.manage",
   "permissions.assign",
   "audit_logs.view",
+  "audit_logs.view_details",
+  "audit_logs.export",
   "settings.view",
 ] as const;
 
@@ -178,6 +180,8 @@ export const PERMISSION_MODULES: {
       "roles.manage",
       "permissions.assign",
       "audit_logs.view",
+      "audit_logs.view_details",
+      "audit_logs.export",
     ],
   },
 ];

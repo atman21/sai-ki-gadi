@@ -4,6 +4,7 @@ import {
   requireAdminApi,
   safeErrorMessage,
 } from "@/lib/in-app-announcements/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import {
   DEFAULT_CLOSE_BUTTON,
   validateAnnouncementConfig,
@@ -128,11 +129,40 @@ export async function POST(request: Request) {
       .single();
 
     if (error) {
+      void recordFailure({
+        actor: auth.actor,
+        action: "announcement_created",
+        module: "announcements",
+        description: `Failed to create in-app popup "${internalName}"`,
+        resourceType: "in_app_announcement",
+        entityLabel: internalName,
+        reason: error.message,
+        ...clientMetaFromRequest(request),
+      });
       return NextResponse.json(
         { ok: false, error: error.message },
         { status: 400 },
       );
     }
+
+    void recordSuccess({
+      actor: auth.actor,
+      action: "announcement_created",
+      module: "announcements",
+      description: `In-app popup "${internalName}" created`,
+      resourceType: "in_app_announcement",
+      resourceId: data?.id != null ? String(data.id) : undefined,
+      entityLabel: internalName,
+      afterData: {
+        internal_name: internalName,
+        category: payload.category,
+        status: payload.status,
+        priority: payload.priority,
+        audience_type: payload.audience_type,
+        trigger_type: payload.trigger_type,
+      },
+      ...clientMetaFromRequest(request),
+    });
 
     return NextResponse.json({ ok: true, item: data });
   } catch (error) {

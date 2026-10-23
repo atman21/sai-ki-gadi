@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
+import { requireAdminApi } from "@/lib/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { hasAdminSession } from "@/lib/admin-session";
 import {
   serviceRoleConfigIssue,
@@ -68,29 +70,12 @@ type PatchBody = {
 };
 
 export async function PATCH(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
 
   const body = (await request.json().catch(() => ({}))) as PatchBody;
 
-  let query = supabaseAdmin
+  let query = gate.supabase
     .from("admin_notifications")
     .update({ is_read: true })
     .eq("is_read", false);
@@ -107,12 +92,38 @@ export async function PATCH(request: Request) {
   }
 
   const { error } = await query;
+  const idCount = Array.isArray(body.ids) ? body.ids.length : 0;
   if (error) {
+    void recordFailure({
+      actor: gate.actor,
+      action: "admin_notifications_marked_read",
+      module: "notifications",
+      description: body.markAllRead
+        ? "Failed to mark all admin notifications as read"
+        : `Failed to mark ${idCount} admin notification(s) as read`,
+      resourceType: "admin_notification",
+      reason: error.message,
+      metadata: { markAllRead: Boolean(body.markAllRead), idCount },
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json(
       { ok: false, error: error.message },
       { status: 400 },
     );
   }
+
+  void recordSuccess({
+    actor: gate.actor,
+    action: "admin_notifications_marked_read",
+    module: "notifications",
+    description: body.markAllRead
+      ? "Marked all admin notifications as read"
+      : `Marked ${idCount} admin notification(s) as read`,
+    resourceType: "admin_notification",
+    resourceId: !body.markAllRead && idCount === 1 ? body.ids?.[0] : undefined,
+    metadata: { markAllRead: Boolean(body.markAllRead), idCount },
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true });
 }

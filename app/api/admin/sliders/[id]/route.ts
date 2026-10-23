@@ -1,4 +1,5 @@
 import { requireAdminApi } from "@/lib/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -34,6 +35,12 @@ export async function PUT(req: NextRequest, context: Context) {
 
     const { id } = await context.params;
 
+    const { data: before } = await supabaseAdmin
+      .from("sliders")
+      .select("image, status, display_order, media_type")
+      .eq("id", id)
+      .maybeSingle();
+
     const { data, error } = await supabaseAdmin
       .from("sliders")
       .update({
@@ -46,7 +53,24 @@ export async function PUT(req: NextRequest, context: Context) {
       .select()
       .single();
 
+    const afterData = {
+      image: image.trim(),
+      status,
+      display_order,
+      media_type: normalizeMediaType(media_type),
+    };
+
     if (error) {
+      void recordFailure({
+        actor: __adminGate.actor,
+        action: "slider_updated",
+        module: "sliders",
+        description: `Failed to update slider ${id}`,
+        resourceType: "slider",
+        resourceId: id,
+        reason: error.message,
+        ...clientMetaFromRequest(req),
+      });
       return NextResponse.json(
         {
           error: error.message,
@@ -56,6 +80,23 @@ export async function PUT(req: NextRequest, context: Context) {
         },
       );
     }
+
+    void recordSuccess({
+      actor: __adminGate.actor,
+      action: "slider_updated",
+      module: "sliders",
+      description: `Slider ${id} updated`,
+      resourceType: "slider",
+      resourceId: id,
+      changedFields: Object.keys(afterData).filter(
+        (key) =>
+          JSON.stringify((before as Record<string, unknown> | null)?.[key] ?? null) !==
+          JSON.stringify((afterData as Record<string, unknown>)[key] ?? null),
+      ),
+      beforeData: before ?? null,
+      afterData,
+      ...clientMetaFromRequest(req),
+    });
 
     return NextResponse.json(data);
   } catch (error) {
@@ -77,9 +118,25 @@ export async function DELETE(req: NextRequest, context: Context) {
   try {
     const { id } = await context.params;
 
+    const { data: before } = await supabaseAdmin
+      .from("sliders")
+      .select("image, status, display_order, media_type")
+      .eq("id", id)
+      .maybeSingle();
+
     const { error } = await supabaseAdmin.from("sliders").delete().eq("id", id);
 
     if (error) {
+      void recordFailure({
+        actor: __adminGate.actor,
+        action: "slider_deleted",
+        module: "sliders",
+        description: `Failed to delete slider ${id}`,
+        resourceType: "slider",
+        resourceId: id,
+        reason: error.message,
+        ...clientMetaFromRequest(req),
+      });
       return NextResponse.json(
         {
           error: error.message,
@@ -89,6 +146,17 @@ export async function DELETE(req: NextRequest, context: Context) {
         },
       );
     }
+
+    void recordSuccess({
+      actor: __adminGate.actor,
+      action: "slider_deleted",
+      module: "sliders",
+      description: `Slider ${id} deleted`,
+      resourceType: "slider",
+      resourceId: id,
+      beforeData: before ?? null,
+      ...clientMetaFromRequest(req),
+    });
 
     return NextResponse.json({
       success: true,

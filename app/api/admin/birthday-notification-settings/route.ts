@@ -1,12 +1,12 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { hasAdminSession } from "@/lib/admin-session";
+import { requireAdminApi } from "@/lib/admin-api";
 import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+  clientMetaFromRequest,
+  recordChange,
+  recordFailure,
+} from "@/lib/admin-audit";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type BirthdayNotificationSettings = {
   id: number;
@@ -15,34 +15,8 @@ export type BirthdayNotificationSettings = {
   updated_at: string | null;
 };
 
-function unauthorized() {
-  return NextResponse.json(
-    { ok: false, error: "Unauthorized" },
-    { status: 401 },
-  );
-}
-
-function serviceUnavailable() {
-  return NextResponse.json(
-    {
-      ok: false,
-      error:
-        serviceRoleConfigIssue() ??
-        "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-    },
-    { status: 503 },
-  );
-}
-
 async function requireAdmin() {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return { ok: false as const, response: unauthorized() };
-  }
-  if (!usingServiceRole) {
-    return { ok: false as const, response: serviceUnavailable() };
-  }
-  return { ok: true as const };
+  return requireAdminApi();
 }
 
 /** Normalize to HH:MM 24h Asia/Kolkata wall time. */
@@ -119,6 +93,12 @@ export async function PUT(req: Request) {
       );
     }
 
+    const { data: before } = await supabaseAdmin
+      .from("birthday_notification_settings")
+      .select("enabled, send_time")
+      .eq("id", 1)
+      .maybeSingle();
+
     const { data, error } = await supabaseAdmin
       .from("birthday_notification_settings")
       .upsert(
@@ -133,11 +113,38 @@ export async function PUT(req: Request) {
       .single();
 
     if (error) {
+      void recordFailure({
+        actor: auth.actor,
+        action: "birthday_notification_settings_updated",
+        module: "notifications",
+        description: "Failed to update birthday notification settings",
+        resourceType: "birthday_notification_settings",
+        resourceId: "1",
+        reason: error.message,
+        metadata: { enabled, send_time: sendTime },
+        ...clientMetaFromRequest(req),
+      });
       return NextResponse.json(
         { ok: false, error: error.message },
         { status: 500 },
       );
     }
+
+    void recordChange({
+      actor: auth.actor,
+      action: "birthday_notification_settings_updated",
+      module: "notifications",
+      description: `Birthday notifications ${enabled ? "enabled" : "disabled"} at ${sendTime} IST`,
+      resourceType: "birthday_notification_settings",
+      resourceId: "1",
+      changedFields: [
+        ...(before?.enabled !== enabled ? ["enabled"] : []),
+        ...(before?.send_time !== sendTime ? ["send_time"] : []),
+      ],
+      beforeData: before ?? null,
+      afterData: { enabled, send_time: sendTime },
+      ...clientMetaFromRequest(req),
+    });
 
     return NextResponse.json({
       ok: true,

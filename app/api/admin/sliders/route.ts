@@ -1,4 +1,5 @@
 import { requireAdminApi } from "@/lib/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -39,6 +40,16 @@ export async function POST(req: Request) {
       .single();
 
     if (error) {
+      void recordFailure({
+        actor: __adminGate.actor,
+        action: "slider_created",
+        module: "sliders",
+        description: "Failed to create slider",
+        resourceType: "slider",
+        reason: error.message,
+        metadata: { media_type: normalizeMediaType(media_type), status, display_order },
+        ...clientMetaFromRequest(req),
+      });
       return NextResponse.json(
         {
           error: error.message,
@@ -48,6 +59,22 @@ export async function POST(req: Request) {
         },
       );
     }
+
+    void recordSuccess({
+      actor: __adminGate.actor,
+      action: "slider_created",
+      module: "sliders",
+      description: `Slider (${normalizeMediaType(media_type)}) created`,
+      resourceType: "slider",
+      resourceId: data?.id != null ? String(data.id) : undefined,
+      afterData: {
+        image: image.trim(),
+        status,
+        display_order,
+        media_type: normalizeMediaType(media_type),
+      },
+      ...clientMetaFromRequest(req),
+    });
 
     return NextResponse.json(data);
   } catch (error) {

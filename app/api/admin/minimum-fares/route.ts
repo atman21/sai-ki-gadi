@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
+import { requireAdminApi } from "@/lib/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { hasAdminSession } from "@/lib/admin-session";
 import {
   serviceRoleConfigIssue,
@@ -171,24 +173,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const validated = validateBody(body);
@@ -210,14 +196,27 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await gate.supabase
     .from("route_minimum_fares")
     .insert(validated.row)
     .select("*")
     .single();
 
+  const routeLabel = `${validated.row.from_city} → ${validated.row.to_city} (${validated.row.vehicle_category})`;
+
   if (error) {
     const msg = error.message.toLowerCase();
+    void recordFailure({
+      actor: gate.actor,
+      action: "minimum_fare_created",
+      module: "fares",
+      description: `Failed to create minimum fare ${routeLabel}`,
+      resourceType: "route_minimum_fare",
+      entityLabel: routeLabel,
+      reason: error.message,
+      metadata: { ...validated.row },
+      ...clientMetaFromRequest(request),
+    });
     if (msg.includes("duplicate") || msg.includes("unique")) {
       return NextResponse.json(
         {
@@ -233,6 +232,18 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  void recordSuccess({
+    actor: gate.actor,
+    action: "minimum_fare_created",
+    module: "fares",
+    description: `Minimum fare ${routeLabel} created at ${validated.row.minimum_fare}`,
+    resourceType: "route_minimum_fare",
+    resourceId: data?.id != null ? String(data.id) : undefined,
+    entityLabel: routeLabel,
+    afterData: { ...validated.row },
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true, data });
 }

@@ -3,6 +3,11 @@ import { randomUUID } from "crypto";
 
 import { NextResponse } from "next/server";
 
+import {
+  clientMetaFromRequest,
+  recordFailure,
+  recordSuccess,
+} from "@/lib/admin-audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -89,7 +94,25 @@ export async function POST(request: Request) {
         upsert: false,
       });
 
+    const uploadMeta = {
+      bucket: "winner-images",
+      mediaKind,
+      originalName: file.name,
+      contentType: file.type,
+      sizeBytes: file.size,
+    };
+
     if (error) {
+      void recordFailure({
+        actor: __adminGate.actor,
+        action: "media_uploaded",
+        module: "uploads",
+        description: `Failed to upload ${mediaKind} "${file.name}"`,
+        resourceType: "storage_object",
+        reason: error.message,
+        metadata: uploadMeta,
+        ...clientMetaFromRequest(request),
+      });
       console.error("Admin upload storage error:", {
         bucket: "winner-images",
         mediaKind,
@@ -111,6 +134,17 @@ export async function POST(request: Request) {
     } = supabaseAdmin.storage
       .from("winner-images")
       .getPublicUrl(fileName);
+
+    void recordSuccess({
+      actor: __adminGate.actor,
+      action: "media_uploaded",
+      module: "uploads",
+      description: `${mediaKind === "video" ? "Video" : "Image"} "${file.name}" uploaded`,
+      resourceType: "storage_object",
+      resourceId: fileName,
+      metadata: uploadMeta,
+      ...clientMetaFromRequest(request),
+    });
 
     return NextResponse.json({
       url: publicUrl,

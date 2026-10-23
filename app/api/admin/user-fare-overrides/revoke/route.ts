@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+import { requireAdminApi } from "@/lib/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
 type Body = {
   overrideId?: string;
@@ -14,24 +9,8 @@ type Body = {
 };
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const overrideId = body.overrideId?.trim() ?? "";
@@ -42,18 +21,56 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data, error } = await supabaseAdmin.rpc("revoke_user_fare_override", {
+  const { data: before } = await gate.supabase
+    .from("user_fare_overrides")
+    .select("user_id, status")
+    .eq("id", overrideId)
+    .maybeSingle();
+  const relatedUserId =
+    before && typeof (before as Record<string, unknown>).user_id === "string"
+      ? ((before as Record<string, unknown>).user_id as string)
+      : null;
+
+  const { data, error } = await gate.supabase.rpc("revoke_user_fare_override", {
     p_override_id: overrideId,
     p_revoked_by: "admin",
     p_reason: body.reason?.trim() || null,
   });
 
+  const revokeReason = body.reason?.trim() || null;
+
   if (error) {
+    void recordFailure({
+      actor: gate.actor,
+      action: "user_fare_override_revoked",
+      module: "fare_overrides",
+      description: `Failed to revoke fare override ${overrideId}`,
+      resourceType: "user_fare_override",
+      resourceId: overrideId,
+      relatedUserId,
+      reason: error.message,
+      metadata: { revokeReason },
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json(
       { ok: false, error: error.message },
       { status: 400 },
     );
   }
+
+  void recordSuccess({
+    actor: gate.actor,
+    action: "user_fare_override_revoked",
+    module: "fare_overrides",
+    description: `Fare override ${overrideId} revoked`,
+    resourceType: "user_fare_override",
+    resourceId: overrideId,
+    relatedUserId,
+    reason: revokeReason,
+    beforeData: before ? { status: (before as Record<string, unknown>).status } : null,
+    afterData: { status: "revoked" },
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true, data });
 }

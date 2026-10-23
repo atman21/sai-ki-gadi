@@ -1,12 +1,12 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { hasAdminSession } from "@/lib/admin-session";
+import { requireAdminApi } from "@/lib/admin-api";
 import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+  clientMetaFromRequest,
+  recordChange,
+  recordFailure,
+} from "@/lib/admin-audit";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type LuckyDrawNotificationSettings = {
   id: number;
@@ -23,34 +23,8 @@ export const LUCKY_DRAW_ALLOWED_SLOTS = [
   "21:00",
 ] as const;
 
-function unauthorized() {
-  return NextResponse.json(
-    { ok: false, error: "Unauthorized" },
-    { status: 401 },
-  );
-}
-
-function serviceUnavailable() {
-  return NextResponse.json(
-    {
-      ok: false,
-      error:
-        serviceRoleConfigIssue() ??
-        "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-    },
-    { status: 503 },
-  );
-}
-
 async function requireAdmin() {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return { ok: false as const, response: unauthorized() };
-  }
-  if (!usingServiceRole) {
-    return { ok: false as const, response: serviceUnavailable() };
-  }
-  return { ok: true as const };
+  return requireAdminApi();
 }
 
 function normalizeSlots(input: unknown): string[] | null {
@@ -130,6 +104,12 @@ export async function PUT(req: Request) {
       );
     }
 
+    const { data: before } = await supabaseAdmin
+      .from("lucky_draw_notification_settings")
+      .select("enabled, slots")
+      .eq("id", 1)
+      .maybeSingle();
+
     const { data, error } = await supabaseAdmin
       .from("lucky_draw_notification_settings")
       .upsert(
@@ -144,11 +124,40 @@ export async function PUT(req: Request) {
       .single();
 
     if (error) {
+      void recordFailure({
+        actor: auth.actor,
+        action: "lucky_draw_notification_settings_updated",
+        module: "notifications",
+        description: "Failed to update lucky draw notification settings",
+        resourceType: "lucky_draw_notification_settings",
+        resourceId: "1",
+        reason: error.message,
+        metadata: { enabled, slots },
+        ...clientMetaFromRequest(req),
+      });
       return NextResponse.json(
         { ok: false, error: error.message },
         { status: 500 },
       );
     }
+
+    void recordChange({
+      actor: auth.actor,
+      action: "lucky_draw_notification_settings_updated",
+      module: "notifications",
+      description: `Lucky draw notifications ${enabled ? "enabled" : "disabled"} (${slots.join(", ")} IST)`,
+      resourceType: "lucky_draw_notification_settings",
+      resourceId: "1",
+      changedFields: [
+        ...(before?.enabled !== enabled ? ["enabled"] : []),
+        ...(JSON.stringify(before?.slots ?? null) !== JSON.stringify(slots)
+          ? ["slots"]
+          : []),
+      ],
+      beforeData: before ?? null,
+      afterData: { enabled, slots },
+      ...clientMetaFromRequest(req),
+    });
 
     return NextResponse.json({
       ok: true,

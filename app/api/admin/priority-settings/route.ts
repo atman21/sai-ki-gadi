@@ -1,4 +1,5 @@
 import { requireAdminApi } from "@/lib/admin-api";
+import { clientMetaFromRequest, recordChange, recordFailure } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -73,6 +74,12 @@ export async function PUT(req: Request) {
       );
     }
 
+    const { data: before } = await supabaseAdmin
+      .from("requirement_priority_settings")
+      .select("matching_platinum_minutes, all_platinum_minutes, all_gold_minutes")
+      .eq("id", 1)
+      .maybeSingle();
+
     const { data, error } = await supabaseAdmin
       .from("requirement_priority_settings")
       .upsert(
@@ -90,8 +97,40 @@ export async function PUT(req: Request) {
       .single();
 
     if (error) {
+      void recordFailure({
+        actor: __adminGate.actor,
+        action: "priority_settings_updated",
+        module: "settings",
+        description: "Failed to update priority settings",
+        resourceType: "requirement_priority_settings",
+        resourceId: "1",
+        reason: error.message,
+        ...clientMetaFromRequest(req),
+      });
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const afterData = {
+      matching_platinum_minutes: matching,
+      all_platinum_minutes: platinum,
+      all_gold_minutes: gold,
+    };
+    void recordChange({
+      actor: __adminGate.actor,
+      action: "priority_settings_updated",
+      module: "settings",
+      description: "Requirement priority settings updated",
+      resourceType: "requirement_priority_settings",
+      resourceId: "1",
+      changedFields: Object.keys(afterData).filter(
+        (key) =>
+          (before as Record<string, unknown> | null)?.[key] !==
+          (afterData as Record<string, unknown>)[key],
+      ),
+      beforeData: before ?? null,
+      afterData,
+      ...clientMetaFromRequest(req),
+    });
 
     return NextResponse.json(data);
   } catch {

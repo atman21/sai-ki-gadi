@@ -1,4 +1,5 @@
 import { requireAdminApi } from "@/lib/admin-api";
+import { clientMetaFromRequest, recordChange, recordFailure } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -110,6 +111,12 @@ export async function PUT(req: Request) {
       );
     }
 
+    const { data: before } = await supabaseAdmin
+      .from("about_us_content")
+      .select(SELECT_COLUMNS)
+      .eq("language_code", languageCode)
+      .maybeSingle();
+
     const { data, error } = await supabaseAdmin
       .from("about_us_content")
       .upsert(
@@ -129,8 +136,58 @@ export async function PUT(req: Request) {
       .single();
 
     if (error) {
+      void recordFailure({
+        actor: __adminGate.actor,
+        action: "about_us_updated",
+        module: "content",
+        description: `Failed to update About Us (${languageCode})`,
+        resourceType: "about_us_content",
+        resourceId: languageCode,
+        reason: error.message,
+        ...clientMetaFromRequest(req),
+      });
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const aboutFields = [
+      "title",
+      "description",
+      "mission",
+      "vision",
+      "offerings",
+      "closing",
+      "is_active",
+    ] as const;
+    const beforeRow = (before ?? null) as Record<string, unknown> | null;
+    const afterRow = data as unknown as Record<string, unknown>;
+    const changedFields = aboutFields.filter(
+      (key) => (beforeRow?.[key] ?? null) !== (afterRow[key] ?? null),
+    );
+    const pick = (row: Record<string, unknown> | null) =>
+      row
+        ? Object.fromEntries(
+            aboutFields.map((key) => [
+              key,
+              typeof row[key] === "string"
+                ? String(row[key]).slice(0, 300)
+                : row[key],
+            ]),
+          )
+        : null;
+    void recordChange({
+      actor: __adminGate.actor,
+      action: "about_us_updated",
+      module: "content",
+      description: `About Us content updated (${languageCode})`,
+      resourceType: "about_us_content",
+      resourceId: (data as AboutUsContentRow).id ?? languageCode,
+      entityLabel: languageCode,
+      changedFields: [...changedFields],
+      beforeData: pick(beforeRow),
+      afterData: pick(afterRow),
+      metadata: { language_code: languageCode, isNewRow: !before },
+      ...clientMetaFromRequest(req),
+    });
 
     return NextResponse.json(data as AboutUsContentRow);
   } catch {

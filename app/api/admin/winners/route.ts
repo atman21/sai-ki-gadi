@@ -1,4 +1,5 @@
 import { requireAdminApi } from "@/lib/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 export async function POST(request: Request) {
@@ -17,7 +18,27 @@ export async function POST(request: Request) {
     const payload = { date, winner_text: winnerText, user_id: null, slot: "", image: null, media_type: "image" };
     
     const { error } = await supabaseAdmin.from("winners").insert(payload);
-    if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    if (error) {
+      void recordFailure({
+        actor: gate.actor,
+        action: "winner_created",
+        module: "winners",
+        description: `Failed to add winner for ${date}`,
+        resourceType: "winner",
+        reason: error.message,
+        ...clientMetaFromRequest(request),
+      });
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+    void recordSuccess({
+      actor: gate.actor,
+      action: "winner_created",
+      module: "winners",
+      description: `Winner added for ${date}`,
+      resourceType: "winner",
+      afterData: { date, winner_text: winnerText.slice(0, 500) },
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Unable to save winner" }, { status: 500 });

@@ -6,6 +6,7 @@ import {
   requireAdminApi,
   safeErrorMessage,
 } from "@/lib/in-app-announcements/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
@@ -86,7 +87,25 @@ export async function POST(request: Request) {
         upsert: false,
       });
 
+    const uploadMeta = {
+      kind,
+      fileName: safeName,
+      contentType: file.type || null,
+      sizeBytes: file.size,
+      bucket: "announcement-assets",
+    };
+
     if (error) {
+      void recordFailure({
+        actor: auth.actor,
+        action: "announcement_asset_uploaded",
+        module: "announcements",
+        description: `Failed to upload announcement ${kind} "${safeName}"`,
+        resourceType: "storage_object",
+        reason: error.message,
+        metadata: uploadMeta,
+        ...clientMetaFromRequest(request),
+      });
       return NextResponse.json(
         { ok: false, error: error.message },
         { status: 500 },
@@ -96,6 +115,17 @@ export async function POST(request: Request) {
     const {
       data: { publicUrl },
     } = auth.supabase.storage.from("announcement-assets").getPublicUrl(path);
+
+    void recordSuccess({
+      actor: auth.actor,
+      action: "announcement_asset_uploaded",
+      module: "announcements",
+      description: `Announcement ${kind} "${safeName}" uploaded`,
+      resourceType: "storage_object",
+      resourceId: path,
+      metadata: uploadMeta,
+      ...clientMetaFromRequest(request),
+    });
 
     return NextResponse.json({ ok: true, url: publicUrl, path });
   } catch (error) {
