@@ -5148,7 +5148,7 @@ export function DashboardTabs({
               <div className="flex items-center gap-2">
                 <input
                   type="number"
-                  min={0}
+                  min={1}
                   max={1440}
                   value={diamondMinutes}
                   onChange={(e) => setDiamondMinutes(e.target.value)}
@@ -5192,7 +5192,7 @@ export function DashboardTabs({
               <div className="flex items-center gap-2">
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={1440}
                   value={silverMinutes}
                   onChange={(e) => setSilverMinutes(e.target.value)}
