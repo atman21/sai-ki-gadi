@@ -61,14 +61,13 @@ export async function PUT(req: Request) {
     const gold = Number(body.all_gold_minutes);
 
     if (
-      ![matching, platinum, gold].every(
-        (n) => Number.isInteger(n) && n > 0 && n <= 1440,
-      )
+      !(Number.isInteger(matching) && matching >= 0 && matching <= 1440 &&
+        [platinum, gold].every((n) => Number.isInteger(n) && n > 0 && n <= 1440))
     ) {
       return NextResponse.json(
         {
           error:
-            "Each duration must be a whole number of minutes between 1 and 1440.",
+            "Silver must be 0–1440 minutes; Diamond and Gold must be 1–1440 minutes.",
         },
         { status: 400 },
       );
