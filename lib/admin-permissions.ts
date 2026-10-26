@@ -1,6 +1,7 @@
 /**
  * Canonical Admin Panel permission keys.
- * Must stay in sync with seeded rows in migration 065.
+ * Must stay in sync with seeded rows in migrations 065+ (e.g. 068 for
+ * members.convert_regular_to_gold).
  */
 
 export const ADMIN_PERMISSIONS = [
@@ -11,6 +12,7 @@ export const ADMIN_PERMISSIONS = [
   "members.reject",
   "members.wallet",
   "members.membership",
+  "members.convert_regular_to_gold",
   "vehicles.view",
   "vehicles.approve",
   "vehicles.reject",
@@ -104,6 +106,7 @@ export const PERMISSION_MODULES: {
       "members.reject",
       "members.wallet",
       "members.membership",
+      "members.convert_regular_to_gold",
     ],
   },
   {

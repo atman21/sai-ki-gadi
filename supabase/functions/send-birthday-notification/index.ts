@@ -131,7 +131,7 @@ async function sendFcmToToken(
       notification: { title, body },
       data: {
         title,
-        body,
+        body,  
         notification_type: "birthday",
         route: BIRTHDAY_ROUTE,
       },

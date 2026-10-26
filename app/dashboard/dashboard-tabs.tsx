@@ -1,46 +1,47 @@
 "use client";
 
 import {
-  DragDropContext,
-  Draggable,
-  Droppable,
-  type DropResult,
+    DragDropContext,
+    Draggable,
+    Droppable,
+    type DropResult,
 } from "@hello-pangea/dnd";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { openAdminCommandPalette } from "@/components/admin/command-palette";
+import { StatusBadge } from "@/components/admin/ui/badge";
+import { AdminButton } from "@/components/admin/ui/button";
+import { KpiCard } from "@/components/admin/ui/kpi-card";
+import { PageHeader } from "@/components/admin/ui/page-header";
+import {
+    SimpleBarChart,
+    SimpleDonutChart,
+} from "@/components/admin/ui/simple-charts";
+import {
+    formatUploadNetworkError,
+    readUploadResponse,
+    validateMediaFileSize,
+} from "@/lib/admin-upload";
 import { exportToExcel } from "@/lib/export-excel";
 import { formatDateTime } from "@/lib/format-datetime";
-import {
-  formatUploadNetworkError,
-  readUploadResponse,
-  validateMediaFileSize,
-} from "@/lib/admin-upload";
-import { KpiCard } from "@/components/admin/ui/kpi-card";
-import {
-  SimpleBarChart,
-  SimpleDonutChart,
-} from "@/components/admin/ui/simple-charts";
-import { PageHeader } from "@/components/admin/ui/page-header";
-import { AdminButton } from "@/components/admin/ui/button";
-import { StatusBadge } from "@/components/admin/ui/badge";
-import { openAdminCommandPalette } from "@/components/admin/command-palette";
 
+import { ActiveFareOverridesPanel } from "@/components/admin/active-fare-overrides-panel";
+import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
+import { AdminRolesPanel } from "@/components/admin/admin-roles-panel";
+import { AdminUsersPanel } from "@/components/admin/admin-users-panel";
+import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
+import { FareOverrideRequestsPanel } from "@/components/admin/fare-override-requests-panel";
+import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
+import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
+import { AdminNavIcon } from "./admin-nav-icons";
 import { AboutUsAdminPanel } from "./components/about-us-admin-panel";
 import { InAppAnnouncementsAdminPanel } from "./components/in-app-announcements-admin-panel";
+import { getManualGoldDowngradeBlockReason } from "@/lib/admin-membership-status";
 import { MembershipManagementPanel } from "./components/membership-management-panel";
 import { WalletManagementPanel } from "./components/wallet-management-panel";
-import { AdminNavIcon } from "./admin-nav-icons";
-import { FareOverrideRequestsPanel } from "@/components/admin/fare-override-requests-panel";
-import { ActiveFareOverridesPanel } from "@/components/admin/active-fare-overrides-panel";
-import { AdminUsersPanel } from "@/components/admin/admin-users-panel";
-import { AdminRolesPanel } from "@/components/admin/admin-roles-panel";
-import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
-import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
-import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
-import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
 
 type MembershipCounts = {
   regular: number;
@@ -156,7 +157,10 @@ type AppUser = {
 
 /** Membership state is separate from user account ON/OFF status. */
 function getMembershipStatus(
-  user: Pick<AppUser, "membership_type" | "membership_started_at" | "membership_expires_at">,
+  user: Pick<
+    AppUser,
+    "membership_type" | "membership_started_at" | "membership_expires_at"
+  >,
   now = Date.now(),
 ) {
   return getMembershipLifecycleStatus(user, now);
@@ -522,11 +526,7 @@ function parseBirthDateValue(value: string | null | undefined): Date | null {
   const iso = String(value).trim();
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   if (match) {
-    return new Date(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-    );
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
   }
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
@@ -633,20 +633,55 @@ export function DashboardTabs({
   const [exchangeFromDate, setExchangeFromDate] = useState("");
   const [exchangeToDate, setExchangeToDate] = useState("");
   const [userSearch, setUserSearch] = useState("");
-  const [membershipHistoryUser, setMembershipHistoryUser] = useState<{id:string,name:string}|null>(null);
-  const [membershipHistory, setMembershipHistory] = useState<Array<{id:string,membership_type:string,starts_at:string|null,expires_at:string|null,duration_days:number|null,amount:number|null,payment_reference:string|null,payment_status:string,status:string,source:string}>>([]);
-  const [membershipHistoryLoading, setMembershipHistoryLoading] = useState(false);
+  const [membershipHistoryUser, setMembershipHistoryUser] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [membershipHistory, setMembershipHistory] = useState<
+    Array<{
+      id: string;
+      membership_type: string;
+      starts_at: string | null;
+      expires_at: string | null;
+      duration_days: number | null;
+      amount: number | null;
+      payment_reference: string | null;
+      payment_status: string;
+      status: string;
+      source: string;
+    }>
+  >([]);
+  const [membershipHistoryLoading, setMembershipHistoryLoading] =
+    useState(false);
   const [membershipHistoryError, setMembershipHistoryError] = useState("");
-  async function showMembershipHistory(user:{id:string,first_name:string|null,last_name:string|null}) {
-    setMembershipHistoryUser({id:user.id,name:[user.first_name,user.last_name].filter(Boolean).join(" ")||"User"});
-    setMembershipHistoryLoading(true); setMembershipHistoryError(""); setMembershipHistory([]);
+  async function showMembershipHistory(user: {
+    id: string;
+    first_name: string | null;
+    last_name: string | null;
+  }) {
+    setMembershipHistoryUser({
+      id: user.id,
+      name:
+        [user.first_name, user.last_name].filter(Boolean).join(" ") || "User",
+    });
+    setMembershipHistoryLoading(true);
+    setMembershipHistoryError("");
+    setMembershipHistory([]);
     try {
-      const response=await fetch(`/api/admin/users/${encodeURIComponent(user.id)}/membership-history`);
-      const data=await response.json();
-      if(!response.ok) throw new Error(data.error||"History could not be loaded");
-      setMembershipHistory(data.history||[]);
-    }catch(error){setMembershipHistoryError(error instanceof Error?error.message:"Unable to load history");}
-    finally{setMembershipHistoryLoading(false);}
+      const response = await fetch(
+        `/api/admin/users/${encodeURIComponent(user.id)}/membership-history`,
+      );
+      const data = await response.json();
+      if (!response.ok)
+        throw new Error(data.error || "History could not be loaded");
+      setMembershipHistory(data.history || []);
+    } catch (error) {
+      setMembershipHistoryError(
+        error instanceof Error ? error.message : "Unable to load history",
+      );
+    } finally {
+      setMembershipHistoryLoading(false);
+    }
   }
 
   const [userMembership, setUserMembership] = useState("all");
@@ -660,7 +695,11 @@ export function DashboardTabs({
   const [userToDate, setUserToDate] = useState("");
   const [userSort, setUserSort] = useState<UserSortKey>("created_newest");
   const [birthdaySearch, setBirthdaySearch] = useState("");
-  const [dobEdit, setDobEdit] = useState<{ id: string; name: string; date: string } | null>(null);
+  const [dobEdit, setDobEdit] = useState<{
+    id: string;
+    name: string;
+    date: string;
+  } | null>(null);
   const [dobSaving, setDobSaving] = useState(false);
   const [dobError, setDobError] = useState("");
   const [dobOverrides, setDobOverrides] = useState<Record<string, string>>({});
@@ -669,18 +708,30 @@ export function DashboardTabs({
     setDobSaving(true);
     setDobError("");
     try {
-      const response = await fetch(`/api/admin/users/${encodeURIComponent(dobEdit.id)}/birth-date`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ birth_date: dobEdit.date }),
-      });
+      const response = await fetch(
+        `/api/admin/users/${encodeURIComponent(dobEdit.id)}/birth-date`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ birth_date: dobEdit.date }),
+        },
+      );
       const result = await response.json();
-      if (!response.ok || !result.ok) throw new Error(result.error ?? "Unable to update DOB");
-      setDobOverrides(prev => ({ ...prev, [dobEdit.id]: result.user.birth_date }));
+      if (!response.ok || !result.ok)
+        throw new Error(result.error ?? "Unable to update DOB");
+      setDobOverrides((prev) => ({
+        ...prev,
+        [dobEdit.id]: result.user.birth_date,
+      }));
       setDobEdit(null);
       router.refresh();
     } catch (error) {
-      setDobError(error instanceof Error ? error.message : "Unable to update DOB");
-    } finally { setDobSaving(false); }
+      setDobError(
+        error instanceof Error ? error.message : "Unable to update DOB",
+      );
+    } finally {
+      setDobSaving(false);
+    }
   }
   const [birthdayExactDate, setBirthdayExactDate] = useState("");
   const [birthdayFromDate, setBirthdayFromDate] = useState("");
@@ -1017,10 +1068,9 @@ export function DashboardTabs({
     try {
       setSendingLuckyDrawTest(true);
       setLuckyDrawTestMessage(null);
-      const response = await fetch(
-        "/api/admin/lucky-draw-notification-test",
-        { method: "POST" },
-      );
+      const response = await fetch("/api/admin/lucky-draw-notification-test", {
+        method: "POST",
+      });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         setLuckyDrawTestMessage(
@@ -1087,9 +1137,7 @@ export function DashboardTabs({
       void loadBirthdayNotificationStatus();
       router.refresh();
     } catch {
-      setBirthdayNotifMessage(
-        "Failed to save Birthday notification settings.",
-      );
+      setBirthdayNotifMessage("Failed to save Birthday notification settings.");
     } finally {
       setSavingBirthdayNotif(false);
     }
@@ -1099,10 +1147,9 @@ export function DashboardTabs({
     try {
       setSendingBirthdayTest(true);
       setBirthdayTestMessage(null);
-      const response = await fetch(
-        "/api/admin/birthday-notification-test",
-        { method: "POST" },
-      );
+      const response = await fetch("/api/admin/birthday-notification-test", {
+        method: "POST",
+      });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         setBirthdayTestMessage(
@@ -1286,6 +1333,11 @@ export function DashboardTabs({
     ),
   ];
 
+  const canConvertRegularToGold =
+    adminAccess?.can("members.convert_regular_to_gold") ?? false;
+  const canManageMembership =
+    adminAccess?.can("members.membership") ?? false;
+
   const updateMembership = async (
     userId: string,
     membershipType: string,
@@ -1304,18 +1356,26 @@ export function DashboardTabs({
           membership_duration_days: membershipDurationDays,
           membership_amount: membershipAmount,
           membership_payment_reference: membershipReference,
-          membership_payment_status: membershipAmount != null ? "paid" : "not_recorded",
+          membership_payment_status:
+            membershipAmount != null ? "paid" : "not_recorded",
         }),
       });
 
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
       if (!response.ok) {
-        throw new Error("Failed");
+        throw new Error(data.error || "Failed to update membership");
       }
 
       router.refresh();
     } catch (error) {
       console.error(error);
-      alert("Failed to update membership");
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to update membership",
+      );
     }
   };
 
@@ -2828,7 +2888,9 @@ export function DashboardTabs({
       <aside
         id="admin-side-nav"
         className={`admin-sidebar admin-card fixed inset-y-0 left-0 z-40 overflow-y-auto p-3 shadow-[var(--admin-shadow-lg)] transition-transform lg:sticky lg:top-[calc(var(--admin-header-h)+0.75rem)] lg:z-0 lg:max-h-[calc(100vh-var(--admin-header-h)-1.5rem)] lg:shrink-0 lg:translate-x-0 lg:self-start lg:shadow-[var(--admin-shadow-xs)] ${
-          sidebarCollapsed ? "is-collapsed lg:w-[var(--admin-sidebar-w-collapsed)]" : "lg:w-[var(--admin-sidebar-w)]"
+          sidebarCollapsed
+            ? "is-collapsed lg:w-[var(--admin-sidebar-w-collapsed)]"
+            : "lg:w-[var(--admin-sidebar-w)]"
         } w-72 ${navOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
         <div className="mb-3 lg:hidden">
@@ -2851,10 +2913,20 @@ export function DashboardTabs({
           <button
             type="button"
             className="admin-btn admin-btn-ghost admin-btn-icon hidden lg:inline-flex"
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={
+              sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+            }
             onClick={() => setSidebarCollapsed((v) => !v)}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
+            >
               {sidebarCollapsed ? (
                 <path d="m9 18 6-6-6-6" />
               ) : (
@@ -2894,7 +2966,15 @@ export function DashboardTabs({
             title="Log out"
           >
             <span className="admin-nav-icon flex items-center justify-center rounded-md bg-[var(--admin-danger-soft)] text-[var(--admin-danger)]">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden
+              >
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                 <path d="m16 17 5-5-5-5" />
                 <path d="M21 12H9" />
@@ -2908,246 +2988,311 @@ export function DashboardTabs({
       </aside>
 
       <div className="min-w-0 w-full flex-1 overflow-x-hidden">
-      <PageHeader
-        eyebrow="SAI KI GADI • ADMIN"
-        title={`${greetingForNow()}, Admin`}
-        description="Operational overview for verification, requirements, membership, and content."
-        actions={
-          <>
-            <AdminButton
-              variant="secondary"
-              onClick={() => openAdminCommandPalette()}
-            >
-              Search ⌘K
-            </AdminButton>
-            <AdminButton
-              variant="secondary"
-              onClick={() => router.refresh()}
-            >
-              Refresh
-            </AdminButton>
-            <AdminButton
-              variant="primary"
-              onClick={() => selectTab("pending")}
-            >
-              Review queue
-            </AdminButton>
-          </>
-        }
-      />
+        <PageHeader
+          eyebrow="SAI KI GADI • ADMIN"
+          title={`${greetingForNow()}, Admin`}
+          description="Operational overview for verification, requirements, membership, and content."
+          actions={
+            <>
+              <AdminButton
+                variant="secondary"
+                onClick={() => openAdminCommandPalette()}
+              >
+                Search ⌘K
+              </AdminButton>
+              <AdminButton variant="secondary" onClick={() => router.refresh()}>
+                Refresh
+              </AdminButton>
+              <AdminButton
+                variant="primary"
+                onClick={() => selectTab("pending")}
+              >
+                Review queue
+              </AdminButton>
+            </>
+          }
+        />
 
-      {showRlsHint ? (
-        <div className="mb-5 rounded-[var(--admin-radius)] border border-[var(--admin-warning-border)] bg-[var(--admin-warning-soft)] px-4 py-3 text-sm text-[var(--admin-warning)]">
-          <p className="font-semibold">Admin cannot bypass RLS</p>
-          <p className="mt-1 text-[var(--admin-text-secondary)]">
-            Profile Change Requests stay empty until a real{" "}
-            <strong>server-only</strong> service-role/secret key is set for the
-            same Supabase project this Admin Panel is connected to.
-          </p>
-          {serviceRoleIssue ? (
-            <p className="mt-2">
-              Detected issue: <code>{serviceRoleIssue}</code>
+        {showRlsHint ? (
+          <div className="mb-5 rounded-[var(--admin-radius)] border border-[var(--admin-warning-border)] bg-[var(--admin-warning-soft)] px-4 py-3 text-sm text-[var(--admin-warning)]">
+            <p className="font-semibold">Admin cannot bypass RLS</p>
+            <p className="mt-1 text-[var(--admin-text-secondary)]">
+              Profile Change Requests stay empty until a real{" "}
+              <strong>server-only</strong> service-role/secret key is set for
+              the same Supabase project this Admin Panel is connected to.
             </p>
-          ) : null}
-          <p className="mt-2 text-[var(--admin-text-secondary)]">
-            Connected host: <code>{supabaseHost || "unknown"}</code>. In
-            Supabase Dashboard for that project → Settings → API Keys, copy the{" "}
-            <strong>secret</strong> / service_role key into{" "}
-            <code>SUPABASE_SERVICE_ROLE_KEY</code> in <code>.env.local</code>{" "}
-            (not <code>NEXT_PUBLIC_*</code>), then restart Next.js. Do not use
-            the publishable/anon key.
-          </p>
-        </div>
-      ) : null}
-
-      {profileChangeRequestsError ? (
-        <div className="mb-5 rounded-[var(--admin-radius)] border border-[var(--admin-danger-border)] bg-[var(--admin-danger-soft)] px-4 py-3 text-sm text-[var(--admin-danger)]">
-          Failed to load profile change requests: {profileChangeRequestsError}
-        </div>
-      ) : null}
-
-      {activeTab === "overview" ? (
-        <div className="space-y-5">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {overviewCards.slice(0, 8).map((card) => (
-              <KpiCard
-                key={card.label}
-                title={card.label}
-                value={card.value}
-                subtitle={card.subtitle}
-                status={card.status}
-                trendLabel={
-                  card.label === "Total users"
-                    ? registrationsLast30.trendLabel
-                    : null
-                }
-                sparkline={
-                  card.label === "Total users"
-                    ? registrationTrend.map((p) => p.value)
-                    : undefined
-                }
-                onClick={() => selectTab(card.tab)}
-              />
-            ))}
+            {serviceRoleIssue ? (
+              <p className="mt-2">
+                Detected issue: <code>{serviceRoleIssue}</code>
+              </p>
+            ) : null}
+            <p className="mt-2 text-[var(--admin-text-secondary)]">
+              Connected host: <code>{supabaseHost || "unknown"}</code>. In
+              Supabase Dashboard for that project → Settings → API Keys, copy
+              the <strong>secret</strong> / service_role key into{" "}
+              <code>SUPABASE_SERVICE_ROLE_KEY</code> in <code>.env.local</code>{" "}
+              (not <code>NEXT_PUBLIC_*</code>), then restart Next.js. Do not use
+              the publishable/anon key.
+            </p>
           </div>
+        ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-5">
-            <div className="xl:col-span-3">
-              <SimpleBarChart
-                title="User growth · last 14 days"
-                points={registrationTrend}
-              />
-            </div>
-            <div className="xl:col-span-2">
-              <SimpleDonutChart
-                title="Verification funnel"
-                slices={verificationSlices}
-              />
-            </div>
+        {profileChangeRequestsError ? (
+          <div className="mb-5 rounded-[var(--admin-radius)] border border-[var(--admin-danger-border)] bg-[var(--admin-danger-soft)] px-4 py-3 text-sm text-[var(--admin-danger)]">
+            Failed to load profile change requests: {profileChangeRequestsError}
           </div>
+        ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-5">
-            <div className="xl:col-span-3">
-              <SimpleBarChart
-                title="Requirements by ride / car type"
-                points={requirementsByRideType}
-                emptyLabel="No requirements in the current loaded set"
-              />
+        {activeTab === "overview" ? (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {overviewCards.slice(0, 8).map((card) => (
+                <KpiCard
+                  key={card.label}
+                  title={card.label}
+                  value={card.value}
+                  subtitle={card.subtitle}
+                  status={card.status}
+                  trendLabel={
+                    card.label === "Total users"
+                      ? registrationsLast30.trendLabel
+                      : null
+                  }
+                  sparkline={
+                    card.label === "Total users"
+                      ? registrationTrend.map((p) => p.value)
+                      : undefined
+                  }
+                  onClick={() => selectTab(card.tab)}
+                />
+              ))}
             </div>
-            <div className="xl:col-span-2">
-              <SimpleDonutChart
-                title="Membership distribution"
-                slices={membershipSlices}
-              />
+
+            <div className="grid gap-4 xl:grid-cols-5">
+              <div className="xl:col-span-3">
+                <SimpleBarChart
+                  title="User growth · last 14 days"
+                  points={registrationTrend}
+                />
+              </div>
+              <div className="xl:col-span-2">
+                <SimpleDonutChart
+                  title="Verification funnel"
+                  slices={verificationSlices}
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <section className="admin-card p-4 sm:p-5">
-              <h3 className="admin-section-title mb-3">Recent activity</h3>
-              {recentActivity.length === 0 ? (
-                <p className="admin-caption py-8 text-center">
-                  No recent operational events in the loaded dataset.
-                </p>
-              ) : (
-                <ul className="space-y-0">
-                  {recentActivity.map((item) => (
-                    <li
-                      key={item.id}
-                      className="flex items-start gap-3 border-b border-[var(--admin-border)] py-2.5 last:border-0"
-                    >
-                      <span
-                        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                          item.tone === "danger"
-                            ? "bg-[var(--admin-danger)]"
-                            : item.tone === "success"
-                              ? "bg-[var(--admin-success)]"
-                              : item.tone === "warning"
-                                ? "bg-[var(--admin-warning)]"
-                                : "bg-[var(--admin-accent)]"
-                        }`}
-                        aria-hidden
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-[var(--admin-text)]">
-                          {item.title}
-                        </p>
-                        <p className="admin-meta mt-0.5">
-                          {item.meta} · {formatRelativeShort(item.at)}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            <div className="grid gap-4 xl:grid-cols-5">
+              <div className="xl:col-span-3">
+                <SimpleBarChart
+                  title="Requirements by ride / car type"
+                  points={requirementsByRideType}
+                  emptyLabel="No requirements in the current loaded set"
+                />
+              </div>
+              <div className="xl:col-span-2">
+                <SimpleDonutChart
+                  title="Membership distribution"
+                  slices={membershipSlices}
+                />
+              </div>
+            </div>
 
-            <div className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-2">
               <section className="admin-card p-4 sm:p-5">
-                <h3 className="admin-section-title mb-3">Pending actions</h3>
-                {pendingActions.length === 0 ? (
-                  <p className="admin-caption py-6 text-center">
-                    Everything looks clear right now.
+                <h3 className="admin-section-title mb-3">Recent activity</h3>
+                {recentActivity.length === 0 ? (
+                  <p className="admin-caption py-8 text-center">
+                    No recent operational events in the loaded dataset.
                   </p>
                 ) : (
-                  <ul className="space-y-2">
-                    {pendingActions.map((action) => (
-                      <li key={action.key}>
-                        <button
-                          type="button"
-                          onClick={() => selectTab(action.key)}
-                          className="flex w-full items-center justify-between rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] px-3 py-2.5 text-left transition hover:bg-[var(--admin-surface-hover)]"
-                        >
-                          <span className="text-sm font-medium text-[var(--admin-text)]">
-                            {action.label}
-                          </span>
-                          <StatusBadge
-                            status="pending"
-                            label={String(action.count)}
-                          />
-                        </button>
+                  <ul className="space-y-0">
+                    {recentActivity.map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex items-start gap-3 border-b border-[var(--admin-border)] py-2.5 last:border-0"
+                      >
+                        <span
+                          className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                            item.tone === "danger"
+                              ? "bg-[var(--admin-danger)]"
+                              : item.tone === "success"
+                                ? "bg-[var(--admin-success)]"
+                                : item.tone === "warning"
+                                  ? "bg-[var(--admin-warning)]"
+                                  : "bg-[var(--admin-accent)]"
+                          }`}
+                          aria-hidden
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-[var(--admin-text)]">
+                            {item.title}
+                          </p>
+                          <p className="admin-meta mt-0.5">
+                            {item.meta} · {formatRelativeShort(item.at)}
+                          </p>
+                        </div>
                       </li>
                     ))}
                   </ul>
                 )}
               </section>
 
-              <section className="admin-card p-4 sm:p-5">
-                <h3 className="admin-section-title mb-3">Quick actions</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {(
-                    [
-                      ["pending", "Verification"],
-                      ["users", "Users"],
-                      ["requirements", "Requirements"],
-                      ["fraud-reports", "Fraud"],
-                      ["priority-settings", "Priority"],
-                      ["in-app-popups", "Pop-ups"],
-                    ] as [TabKey, string][]
-                  ).map(([key, label]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => selectTab(key)}
-                      className="admin-btn admin-btn-secondary h-9 justify-start px-3 text-xs"
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </section>
+              <div className="space-y-4">
+                <section className="admin-card p-4 sm:p-5">
+                  <h3 className="admin-section-title mb-3">Pending actions</h3>
+                  {pendingActions.length === 0 ? (
+                    <p className="admin-caption py-6 text-center">
+                      Everything looks clear right now.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {pendingActions.map((action) => (
+                        <li key={action.key}>
+                          <button
+                            type="button"
+                            onClick={() => selectTab(action.key)}
+                            className="flex w-full items-center justify-between rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] px-3 py-2.5 text-left transition hover:bg-[var(--admin-surface-hover)]"
+                          >
+                            <span className="text-sm font-medium text-[var(--admin-text)]">
+                              {action.label}
+                            </span>
+                            <StatusBadge
+                              status="pending"
+                              label={String(action.count)}
+                            />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="admin-card p-4 sm:p-5">
+                  <h3 className="admin-section-title mb-3">Quick actions</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        ["pending", "Verification"],
+                        ["users", "Users"],
+                        ["requirements", "Requirements"],
+                        ["fraud-reports", "Fraud"],
+                        ["priority-settings", "Priority"],
+                        ["in-app-popups", "Pop-ups"],
+                      ] as [TabKey, string][]
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => selectTab(key)}
+                        className="admin-btn admin-btn-secondary h-9 justify-start px-3 text-xs"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>
             </div>
-          </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {overviewCards.slice(8).map((card) => (
-              <KpiCard
-                key={card.label}
-                title={card.label}
-                value={card.value}
-                subtitle={card.subtitle}
-                status={card.status}
-                onClick={() => selectTab(card.tab)}
-              />
-            ))}
-          </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {overviewCards.slice(8).map((card) => (
+                <KpiCard
+                  key={card.label}
+                  title={card.label}
+                  value={card.value}
+                  subtitle={card.subtitle}
+                  status={card.status}
+                  onClick={() => selectTab(card.tab)}
+                />
+              ))}
+            </div>
 
-          <p className="admin-caption">
-            Trends use real <code>users.created_at</code> values. Percentage
-            change appears only when a prior 30-day baseline exists.
-          </p>
-        </div>
-      ) : activeTab === "pending" ? (
-        <>
-          <div className="mb-4 flex justify-end">
-            <button
-              type="button"
-              onClick={exportPendingUsers}
-              className="admin-btn admin-btn-success"
-            >
-              Export to Excel
-            </button>
+            <p className="admin-caption">
+              Trends use real <code>users.created_at</code> values. Percentage
+              change appears only when a prior 30-day baseline exists.
+            </p>
           </div>
+        ) : activeTab === "pending" ? (
+          <>
+            <div className="mb-4 flex justify-end">
+              <button
+                type="button"
+                onClick={exportPendingUsers}
+                className="admin-btn admin-btn-success"
+              >
+                Export to Excel
+              </button>
+            </div>
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Name
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Phone
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Email
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Membership
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {pendingVerificationUsers.length === 0 ? (
+                      <tr>
+                        <td
+                          className="px-4 py-10 text-center text-slate-500"
+                          colSpan={4}
+                        >
+                          No users are currently waiting for manual
+                          verification.
+                        </td>
+                      </tr>
+                    ) : (
+                      pendingVerificationUsers.map((user) => (
+                        <tr
+                          key={user.id}
+                          className="cursor-pointer hover:bg-slate-50"
+                          onClick={() => {
+                            router.push(`/dashboard/verification/${user.id}`);
+                          }}
+                        >
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-slate-800">
+                              {user.fullName}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {user.id.slice(0, 8)}...
+                            </p>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {user.phone}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {user.email}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            <StatusBadge
+                              status={user.membershipType}
+                              label={formatMembership(user.membershipType)}
+                            />
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : activeTab === "rejected-partial" ? (
           <div className="admin-table-wrap">
             <div className="overflow-x-auto">
               <table className="admin-table">
@@ -3168,17 +3313,17 @@ export function DashboardTabs({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {pendingVerificationUsers.length === 0 ? (
+                  {rejectedPartialUsers.length === 0 ? (
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
                         colSpan={4}
                       >
-                        No users are currently waiting for manual verification.
+                        No rejected or partially uploaded verification users.
                       </td>
                     </tr>
                   ) : (
-                    pendingVerificationUsers.map((user) => (
+                    rejectedPartialUsers.map((user) => (
                       <tr
                         key={user.id}
                         className="cursor-pointer hover:bg-slate-50"
@@ -3213,237 +3358,58 @@ export function DashboardTabs({
               </table>
             </div>
           </div>
-        </>
-      ) : activeTab === "rejected-partial" ? (
-        <div className="admin-table-wrap">
-          <div className="overflow-x-auto">
-            <table className="admin-table">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    Name
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    Phone
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    Email
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    Membership
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rejectedPartialUsers.length === 0 ? (
-                  <tr>
-                    <td
-                      className="px-4 py-10 text-center text-slate-500"
-                      colSpan={4}
-                    >
-                      No rejected or partially uploaded verification users.
-                    </td>
-                  </tr>
-                ) : (
-                  rejectedPartialUsers.map((user) => (
-                    <tr
-                      key={user.id}
-                      className="cursor-pointer hover:bg-slate-50"
-                      onClick={() => {
-                        router.push(`/dashboard/verification/${user.id}`);
-                      }}
-                    >
-                      <td className="px-4 py-3">
-                        <p className="font-semibold text-slate-800">
-                          {user.fullName}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {user.id.slice(0, 8)}...
-                        </p>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">{user.phone}</td>
-                      <td className="px-4 py-3 text-slate-600">{user.email}</td>
-                      <td className="px-4 py-3 text-slate-600">
-                        <StatusBadge
-                          status={user.membershipType}
-                          label={formatMembership(user.membershipType)}
-                        />
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : activeTab === "not-started" ? (
-        <div className="admin-table-wrap">
-          <div className="overflow-x-auto">
-            <table className="admin-table">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    Name
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    Phone
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    Email
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                    Membership
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {notStartedVerificationUsers.length === 0 ? (
-                  <tr>
-                    <td
-                      className="px-4 py-10 text-center text-slate-500"
-                      colSpan={4}
-                    >
-                      Every unverified user has initiated verification.
-                    </td>
-                  </tr>
-                ) : (
-                  notStartedVerificationUsers.map((user) => (
-                    <tr key={user.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3">
-                        <p className="font-semibold text-slate-800">
-                          {user.fullName}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {user.id.slice(0, 8)}...
-                        </p>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">{user.phone}</td>
-                      <td className="px-4 py-3 text-slate-600">{user.email}</td>
-                      <td className="px-4 py-3 text-slate-600">
-                        <StatusBadge
-                          status={user.membershipType}
-                          label={formatMembership(user.membershipType)}
-                        />
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : activeTab === "cities" ? (
-        <>
-          <div className="mb-4 flex justify-end">
-            <button
-              onClick={() => {
-                setEditingCityId(null);
-
-                setCityName("");
-                setStateName("");
-                setDistrictName("");
-
-                setShowCityModal(true);
-              }}
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              Add City
-            </button>
-          </div>
-
+        ) : activeTab === "not-started" ? (
           <div className="admin-table-wrap">
             <div className="overflow-x-auto">
               <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      City
+                      Name
                     </th>
-
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      State
+                      Phone
                     </th>
-
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      District
+                      Email
                     </th>
-
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Status
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Actions
+                      Membership
                     </th>
                   </tr>
                 </thead>
-
                 <tbody className="divide-y divide-slate-100">
-                  {(cities?.length || 0) === 0 ? (
+                  {notStartedVerificationUsers.length === 0 ? (
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={5}
+                        colSpan={4}
                       >
-                        No cities found.
+                        Every unverified user has initiated verification.
                       </td>
                     </tr>
                   ) : (
-                    (cities ?? []).map((city) => (
-                      <tr key={city.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-semibold text-slate-800">
-                          {city.city}
-                        </td>
-
-                        <td className="px-4 py-3 text-slate-600">
-                          {city.state}
-                        </td>
-
-                        <td className="px-4 py-3 text-slate-600">
-                          {city.district || "-"}
-                        </td>
-
+                    notStartedVerificationUsers.map((user) => (
+                      <tr key={user.id} className="hover:bg-slate-50">
                         <td className="px-4 py-3">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              city.is_active
-                                ? "bg-emerald-100 text-emerald-700"
-                                : "bg-red-100 text-red-700"
-                            }`}
-                          >
-                            {city.is_active ? "Active" : "Inactive"}
-                          </span>
+                          <p className="font-semibold text-slate-800">
+                            {user.fullName}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {user.id.slice(0, 8)}...
+                          </p>
                         </td>
-
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => {
-                                setEditingCityId(city.id);
-
-                                setCityName(city.city);
-
-                                setStateName(city.state);
-
-                                setDistrictName(city.district || "");
-
-                                setShowCityModal(true);
-                              }}
-                              className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
-                            >
-                              Edit
-                            </button>
-
-                            <button
-                              onClick={() => deleteCity(city.id)}
-                              disabled={deletingCityId === city.id}
-                              className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
-                            >
-                              {deletingCityId === city.id
-                                ? "Deleting..."
-                                : "Delete"}
-                            </button>
-                          </div>
+                        <td className="px-4 py-3 text-slate-600">
+                          {user.phone}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {user.email}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          <StatusBadge
+                            status={user.membershipType}
+                            label={formatMembership(user.membershipType)}
+                          />
                         </td>
                       </tr>
                     ))
@@ -3452,1104 +3418,1692 @@ export function DashboardTabs({
               </table>
             </div>
           </div>
-        </>
-      ) : activeTab === "users" ? (
-        <>
-          {membershipHistoryUser ? <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => setMembershipHistoryUser(null)}>
-            <div className="admin-card max-h-[85vh] w-full max-w-3xl overflow-y-auto p-5" role="dialog" aria-modal="true" aria-label="Membership history" onClick={(e)=>e.stopPropagation()}>
-              <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-lg font-semibold">Membership History — {membershipHistoryUser.name}</h2><button type="button" className="admin-btn admin-btn-secondary" onClick={()=>setMembershipHistoryUser(null)}>Close</button></div>
-              {membershipHistoryLoading ? <p>Loading membership history…</p> : membershipHistoryError ? <p className="text-red-600">{membershipHistoryError}</p> : membershipHistory.length===0 ? <p>No historical records available.</p> :
-              <div className="overflow-x-auto"><table className="admin-table"><thead><tr>{["Plan","From","To","Days","Amount","Payment","Reference","Status","Source"].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{membershipHistory.map(h=><tr key={h.id}>
-                <td>{h.membership_type}</td><td>{h.starts_at?formatDateTime(h.starts_at):"—"}</td><td>{h.expires_at?formatDateTime(h.expires_at):"—"}</td><td>{h.duration_days??"—"}</td><td>{h.amount==null?"Unknown":`₹${h.amount}`}</td><td>{h.payment_status}</td><td>{h.payment_reference||"—"}</td><td>{h.status}</td><td>{h.source==="legacy_snapshot"?"Historical snapshot":h.source}</td>
-              </tr>)}</tbody></table></div>}
-            </div>
-          </div> : null}
-          <div className="mb-4 flex justify-end">
-            <button
-              type="button"
-              onClick={exportActiveUsers}
-              className="admin-btn admin-btn-success"
-            >
-              Export to Excel
-            </button>
-          </div>
-          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center gap-3 overflow-x-auto pb-1">
-              <input
-                type="text"
-                placeholder="Search Name / Phone / Email"
-                value={userSearch}
-                onChange={(e) => setUserSearch(e.target.value)}
-                className="h-11 w-72 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 placeholder:text-slate-400"
-              />
-
-              <select
-                value={userMembership}
-                onChange={(e) => setUserMembership(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-              >
-                <option value="all">All Membership</option>
-                <option value="regular">Regular</option>
-                <option value="gold">Gold</option>
-              </select>
-
-              <select
-                value={userVerification}
-                onChange={(e) => setUserVerification(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-              >
-                <option value="all">All Verification</option>
-                <option value="verified">Verified</option>
-                <option value="pending">Pending</option>
-              </select>
-
-              <select
-                value={userStatusFilter}
-                onChange={(e) => setUserStatusFilter(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-              >
-                <option value="all">All Status</option>
-                <option value="active">ON</option>
-                <option value="inactive">OFF</option>
-              </select>
-
-              <select
-                value={userSort}
-                onChange={(e) => setUserSort(e.target.value as UserSortKey)}
-                className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-              >
-                <option value="created_newest">Created Date: Newest</option>
-                <option value="created_oldest">Created Date: Oldest</option>
-                <option value="last_active_recent">
-                  Last Active: Most Recent
-                </option>
-                <option value="last_active_least">
-                  Last Active: Least Recent
-                </option>
-                <option value="total_posts">Total Posts</option>
-                <option value="rating">Rating</option>
-              </select>
-
-              <input
-                type="date"
-                value={userFromDate}
-                onChange={(e) => setUserFromDate(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-              />
-
-              <input
-                type="date"
-                value={userToDate}
-                onChange={(e) => setUserToDate(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-              />
-
+        ) : activeTab === "cities" ? (
+          <>
+            <div className="mb-4 flex justify-end">
               <button
                 onClick={() => {
-                  setUserSearch("");
-                  setUserMembership("all");
-                  setUserVerification("all");
-                  setUserStatusFilter("all");
-                  setUserFromDate("");
-                  setUserToDate("");
-                  setUserSort("created_newest");
+                  setEditingCityId(null);
+
+                  setCityName("");
+                  setStateName("");
+                  setDistrictName("");
+
+                  setShowCityModal(true);
                 }}
-                className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-white"
+                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
               >
-                Reset
+                Add City
               </button>
             </div>
-          </div>
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="admin-table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      User
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Phone
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Email
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Plan
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Date of Birth
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Birth Date
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Blood Group
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Reference 1 Name
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Reference 1 Mobile
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Reference 2 Name
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Reference 2 Mobile
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      User Roles
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Created At
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Last Active
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Welcome Completed
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Admin Remarks
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Total Requirements
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Total Exchange Listings
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Total Cab Available Listings
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Total Driver Listings
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Total Posts
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trips Assigned By User</th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trips Assigned To User</th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trip Points</th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Membership Status
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Membership History
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Rating
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Membership Start
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Membership End
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Verification
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Account Status
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredUsers.length === 0 ? (
+
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
                     <tr>
-                      <td
-                        className="px-4 py-10 text-center text-slate-500"
-                        colSpan={32}
-                      >
-                        No users found.
-                      </td>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        City
+                      </th>
+
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        State
+                      </th>
+
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        District
+                      </th>
+
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Status
+                      </th>
+
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Actions
+                      </th>
                     </tr>
-                  ) : (
-                    filteredUsers.map((user) => (
-                      <tr
-                        key={user.id}
-                        onClick={() =>
-                          router.push(`/dashboard/users/${user.id}?tab=users`)
-                        }
-                        className={`cursor-pointer hover:bg-slate-50 transition-all ${
-                          updatingUserId === user.id
-                            ? "opacity-50 pointer-events-none"
-                            : ""
-                        }`}
-                      >
-                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                          {user.first_name ?? "-"} {user.last_name ?? "-"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {cellDash(user.phone)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {cellDash(user.email)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <div onClick={(e) => e.stopPropagation()}>
-                            <select
-                              defaultValue={user.membership_type === "gold" && user.membership_expires_at && new Date(user.membership_expires_at).getTime()>Date.now() ? "gold" : "regular"}
-                              className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-800"
-                              onChange={(e) => {
-                                const type = e.target.value;
+                  </thead>
 
-                                if (type === "gold") {
-                                  const duration = Number(
-                                    prompt(
-                                      "Enter membership duration in days\n\nExamples:\n7\n30\n90\n180\n365",
-                                      "30",
-                                    ),
-                                  );
-
-                                  if (!duration || duration <= 0) {
-                                    return;
-                                  }
-
-                                  const amountText = prompt("Amount received in ₹ (leave empty if unknown)", "");
-                                  if (amountText === null) return;
-                                  const amount = amountText.trim() ? Number(amountText) : null;
-                                  if (amount !== null && (!Number.isFinite(amount) || amount < 0)) { alert("Invalid amount"); return; }
-                                  const reference = prompt("Payment reference / UTR (optional)", "");
-                                  if (reference === null) return;
-                                  updateMembership(user.id, "gold", duration, amount, reference);
-                                } else {
-                                  updateMembership(user.id, "regular");
-                                }
-                              }}
-                            >
-                              <option value="regular">Regular</option>
-                              <option value="gold">Gold</option>
-                            </select>
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatBirthDateCell(user.date_of_birth)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatBirthDateCell(dobOverrides[user.id] ?? user.birth_date)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {cellDash(user.blood_group)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {cellDash(user.reference_1_name)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {cellDash(user.reference_1_mobile)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {cellDash(user.reference_2_name)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {cellDash(user.reference_2_mobile)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatUserRolesCell(user.user_roles)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatDateTime(user.created_at)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatDateTime(user.last_active_at)}
-                        </td>
+                  <tbody className="divide-y divide-slate-100">
+                    {(cities?.length || 0) === 0 ? (
+                      <tr>
                         <td
-                          className="whitespace-nowrap px-4 py-3 text-center"
-                          onClick={(e) => e.stopPropagation()}
+                          className="px-4 py-10 text-center text-slate-500"
+                          colSpan={5}
                         >
-                          <button
-                            type="button"
-                            disabled={updatingUserId === user.id}
-                            onClick={() =>
-                              updateWelcome(
-                                user.id,
-                                !Boolean(user.welcome_completed),
-                              )
-                            }
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
-                              user.welcome_completed
-                                ? "bg-emerald-500"
-                                : "bg-slate-300"
-                            }`}
-                            title={
-                              user.welcome_completed
-                                ? "Welcome completed"
-                                : "Welcome pending"
-                            }
-                          >
-                            <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
-                                user.welcome_completed
-                                  ? "translate-x-6"
-                                  : "translate-x-1"
-                              }`}
-                            />
-                          </button>
+                          No cities found.
                         </td>
-                        <td
-                          className="min-w-[180px] px-4 py-3"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            type="text"
-                            value={
-                              remarksDrafts[user.id] ?? user.admin_remarks ?? ""
-                            }
-                            disabled={updatingUserId === user.id}
-                            onChange={(e) =>
-                              setRemarksDrafts((prev) => ({
-                                ...prev,
-                                [user.id]: e.target.value,
-                              }))
-                            }
-                            onBlur={(e) =>
-                              updateRemarks(user.id, e.target.value)
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.currentTarget.blur();
-                              }
-                            }}
-                            placeholder="Add remarks..."
-                            className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-800"
-                          />
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                          {user.requirement_count ?? 0}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                          {user.exchange_count ?? 0}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                          {user.availability_count ?? 0}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                          {user.driver_requirement_count ?? 0}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                          {user.total_posts ?? 0}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_by ?? 0}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_to ?? 0}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trip_points ?? 0}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center">
-                          {(() => {
-                            const status = getMembershipStatus(user);
-                            return (
-                              <span
-                                className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                                  status === "Active"
-                                    ? "bg-emerald-100 text-emerald-700"
-                                    : status === "Expired"
-                                      ? "bg-red-100 text-red-700"
-                                      : "bg-slate-100 text-slate-600"
-                                }`}
-                              >
-                                {status}
-                              </span>
-                            );
-                          })()}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center">
-                          <button
-                            type="button"
-                            className="admin-btn admin-btn-secondary"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void showMembershipHistory(user);
-                            }}
-                          >
-                            View
-                          </button>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                          {user.rating_average != null
-                            ? Number(user.rating_average).toFixed(2)
-                            : "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                          {user.membership_started_at
-                            ? new Date(
-                                user.membership_started_at,
-                              ).toLocaleDateString()
-                            : "-"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                          {user.membership_expires_at
-                            ? new Date(
-                                user.membership_expires_at,
-                              ).toLocaleDateString()
-                            : "-"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              user.verified
-                                ? "bg-emerald-100 text-emerald-700"
-                                : "bg-amber-100 text-amber-700"
-                            }`}
-                          >
-                            {user.verified ? "Verified" : "Pending"}
-                          </span>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center">
-                          {updatingUserId === user.id ? (
-                            <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
-                              <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
-                              Updating...
-                            </span>
-                          ) : (
+                      </tr>
+                    ) : (
+                      (cities ?? []).map((city) => (
+                        <tr key={city.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-semibold text-slate-800">
+                            {city.city}
+                          </td>
+
+                          <td className="px-4 py-3 text-slate-600">
+                            {city.state}
+                          </td>
+
+                          <td className="px-4 py-3 text-slate-600">
+                            {city.district || "-"}
+                          </td>
+
+                          <td className="px-4 py-3">
                             <span
                               className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                user.status
+                                city.is_active
                                   ? "bg-emerald-100 text-emerald-700"
                                   : "bg-red-100 text-red-700"
                               }`}
                             >
-                              {user.status ? "ON" : "OFF"}
+                              {city.is_active ? "Active" : "Inactive"}
                             </span>
-                          )}
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  setEditingCityId(city.id);
+
+                                  setCityName(city.city);
+
+                                  setStateName(city.state);
+
+                                  setDistrictName(city.district || "");
+
+                                  setShowCityModal(true);
+                                }}
+                                className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                              >
+                                Edit
+                              </button>
+
+                              <button
+                                onClick={() => deleteCity(city.id)}
+                                disabled={deletingCityId === city.id}
+                                className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                              >
+                                {deletingCityId === city.id
+                                  ? "Deleting..."
+                                  : "Delete"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : activeTab === "users" ? (
+          <>
+            {membershipHistoryUser ? (
+              <div
+                className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"
+                role="presentation"
+                onClick={() => setMembershipHistoryUser(null)}
+              >
+                <div
+                  className="admin-card max-h-[85vh] w-full max-w-3xl overflow-y-auto p-5"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Membership history"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h2 className="text-lg font-semibold">
+                      Membership History — {membershipHistoryUser.name}
+                    </h2>
+                    <button
+                      type="button"
+                      className="admin-btn admin-btn-secondary"
+                      onClick={() => setMembershipHistoryUser(null)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  {membershipHistoryLoading ? (
+                    <p>Loading membership history…</p>
+                  ) : membershipHistoryError ? (
+                    <p className="text-red-600">{membershipHistoryError}</p>
+                  ) : membershipHistory.length === 0 ? (
+                    <p>No historical records available.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="admin-table">
+                        <thead>
+                          <tr>
+                            {[
+                              "Plan",
+                              "From",
+                              "To",
+                              "Days",
+                              "Amount",
+                              "Payment",
+                              "Reference",
+                              "Status",
+                              "Source",
+                            ].map((h) => (
+                              <th key={h}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {membershipHistory.map((h) => (
+                            <tr key={h.id}>
+                              <td>{h.membership_type}</td>
+                              <td>
+                                {h.starts_at
+                                  ? formatDateTime(h.starts_at)
+                                  : "—"}
+                              </td>
+                              <td>
+                                {h.expires_at
+                                  ? formatDateTime(h.expires_at)
+                                  : "—"}
+                              </td>
+                              <td>{h.duration_days ?? "—"}</td>
+                              <td>
+                                {h.amount == null ? "Unknown" : `₹${h.amount}`}
+                              </td>
+                              <td>{h.payment_status}</td>
+                              <td>{h.payment_reference || "—"}</td>
+                              <td>{h.status}</td>
+                              <td>
+                                {h.source === "legacy_snapshot"
+                                  ? "Historical snapshot"
+                                  : h.source}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            <div className="mb-4 flex justify-end">
+              <button
+                type="button"
+                onClick={exportActiveUsers}
+                className="admin-btn admin-btn-success"
+              >
+                Export to Excel
+              </button>
+            </div>
+            <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-3 overflow-x-auto pb-1">
+                <input
+                  type="text"
+                  placeholder="Search Name / Phone / Email"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  className="h-11 w-72 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 placeholder:text-slate-400"
+                />
+
+                <select
+                  value={userMembership}
+                  onChange={(e) => setUserMembership(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                >
+                  <option value="all">All Membership</option>
+                  <option value="regular">Regular</option>
+                  <option value="gold">Gold</option>
+                </select>
+
+                <select
+                  value={userVerification}
+                  onChange={(e) => setUserVerification(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                >
+                  <option value="all">All Verification</option>
+                  <option value="verified">Verified</option>
+                  <option value="pending">Pending</option>
+                </select>
+
+                <select
+                  value={userStatusFilter}
+                  onChange={(e) => setUserStatusFilter(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                >
+                  <option value="all">All Status</option>
+                  <option value="active">ON</option>
+                  <option value="inactive">OFF</option>
+                </select>
+
+                <select
+                  value={userSort}
+                  onChange={(e) => setUserSort(e.target.value as UserSortKey)}
+                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                >
+                  <option value="created_newest">Created Date: Newest</option>
+                  <option value="created_oldest">Created Date: Oldest</option>
+                  <option value="last_active_recent">
+                    Last Active: Most Recent
+                  </option>
+                  <option value="last_active_least">
+                    Last Active: Least Recent
+                  </option>
+                  <option value="total_posts">Total Posts</option>
+                  <option value="rating">Rating</option>
+                </select>
+
+                <input
+                  type="date"
+                  value={userFromDate}
+                  onChange={(e) => setUserFromDate(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                />
+
+                <input
+                  type="date"
+                  value={userToDate}
+                  onChange={(e) => setUserToDate(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                />
+
+                <button
+                  onClick={() => {
+                    setUserSearch("");
+                    setUserMembership("all");
+                    setUserVerification("all");
+                    setUserStatusFilter("all");
+                    setUserFromDate("");
+                    setUserToDate("");
+                    setUserSort("created_newest");
+                  }}
+                  className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-white"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        User
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Phone
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Email
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Plan
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Date of Birth
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Birth Date
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Blood Group
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Reference 1 Name
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Reference 1 Mobile
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Reference 2 Name
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Reference 2 Mobile
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        User Roles
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Created At
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Last Active
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Welcome Completed
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Admin Remarks
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Total Requirements
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Total Exchange Listings
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Total Cab Available Listings
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Total Driver Listings
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Total Posts
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Trips Assigned By User
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Trips Assigned To User
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Trip Points
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Membership Status
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Membership History
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Rating
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Membership Start
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Membership End
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Verification
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Account Status
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredUsers.length === 0 ? (
+                      <tr>
+                        <td
+                          className="px-4 py-10 text-center text-slate-500"
+                          colSpan={32}
+                        >
+                          No users found.
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <div
-                            className="flex items-center gap-2"
+                      </tr>
+                    ) : (
+                      filteredUsers.map((user) => (
+                        <tr
+                          key={user.id}
+                          onClick={() =>
+                            router.push(`/dashboard/users/${user.id}?tab=users`)
+                          }
+                          className={`cursor-pointer hover:bg-slate-50 transition-all ${
+                            updatingUserId === user.id
+                              ? "opacity-50 pointer-events-none"
+                              : ""
+                          }`}
+                        >
+                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                            {user.first_name ?? "-"} {user.last_name ?? "-"}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                            {cellDash(user.phone)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                            {cellDash(user.email)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <div onClick={(e) => e.stopPropagation()}>
+                              {(() => {
+                                const isActiveGold =
+                                  user.membership_type === "gold" &&
+                                  !!user.membership_expires_at &&
+                                  new Date(
+                                    user.membership_expires_at,
+                                  ).getTime() > Date.now();
+                                const downgradeBlock =
+                                  getManualGoldDowngradeBlockReason(user);
+                                const allowRegularOption = !downgradeBlock;
+                                // Always show Gold when the user is already Gold
+                                // (renew / locked display). Convert from Regular
+                                // still requires convert permission.
+                                const allowGoldOption =
+                                  user.membership_type === "gold" ||
+                                  canConvertRegularToGold;
+                                const selectDisabled =
+                                  !canManageMembership &&
+                                  !canConvertRegularToGold;
+                                const lockedValue =
+                                  user.membership_type === "gold" &&
+                                  !allowRegularOption
+                                    ? "gold"
+                                    : isActiveGold
+                                      ? "gold"
+                                      : "regular";
+                                return (
+                              <select
+                                key={`${user.id}-${lockedValue}-${allowRegularOption}-${allowGoldOption}`}
+                                defaultValue={lockedValue}
+                                disabled={selectDisabled}
+                                title={
+                                  downgradeBlock
+                                    ? downgradeBlock
+                                    : !allowGoldOption
+                                      ? "Convert to Gold requires members.convert_regular_to_gold"
+                                      : undefined
+                                }
+                                className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                onChange={(e) => {
+                                  const type = e.target.value;
+                                  const el = e.target;
+
+                                  if (type === "gold") {
+                                    if (!allowGoldOption) {
+                                      el.value = lockedValue;
+                                      alert(
+                                        "You do not have permission to convert Regular membership to Gold.",
+                                      );
+                                      return;
+                                    }
+                                    if (isActiveGold && !canManageMembership) {
+                                      el.value = "gold";
+                                      alert(
+                                        "You do not have permission to renew Gold membership.",
+                                      );
+                                      return;
+                                    }
+                                    const duration = Number(
+                                      prompt(
+                                        "Enter membership duration in days\n\nExamples:\n7\n30\n90\n180\n365",
+                                        "30",
+                                      ),
+                                    );
+
+                                    if (!duration || duration <= 0) {
+                                      el.value = lockedValue;
+                                      return;
+                                    }
+
+                                    const amountText = prompt(
+                                      "Amount received in ₹ (leave empty if unknown)",
+                                      "",
+                                    );
+                                    if (amountText === null) {
+                                      el.value = lockedValue;
+                                      return;
+                                    }
+                                    const amount = amountText.trim()
+                                      ? Number(amountText)
+                                      : null;
+                                    if (
+                                      amount !== null &&
+                                      (!Number.isFinite(amount) || amount < 0)
+                                    ) {
+                                      alert("Invalid amount");
+                                      el.value = lockedValue;
+                                      return;
+                                    }
+                                    const reference = prompt(
+                                      "Payment reference / UTR (optional)",
+                                      "",
+                                    );
+                                    if (reference === null) {
+                                      el.value = lockedValue;
+                                      return;
+                                    }
+                                    updateMembership(
+                                      user.id,
+                                      "gold",
+                                      duration,
+                                      amount,
+                                      reference,
+                                    );
+                                  } else {
+                                    if (downgradeBlock) {
+                                      el.value = lockedValue;
+                                      alert(downgradeBlock);
+                                      return;
+                                    }
+                                    if (!canManageMembership) {
+                                      el.value = lockedValue;
+                                      alert(
+                                        "You do not have permission to manage memberships.",
+                                      );
+                                      return;
+                                    }
+                                    updateMembership(user.id, "regular");
+                                  }
+                                }}
+                              >
+                                {allowRegularOption ? (
+                                  <option value="regular">Regular</option>
+                                ) : null}
+                                {allowGoldOption ? (
+                                  <option value="gold">Gold</option>
+                                ) : null}
+                              </select>
+                                );
+                              })()}
+                            </div>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {formatBirthDateCell(user.date_of_birth)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {formatBirthDateCell(
+                              dobOverrides[user.id] ?? user.birth_date,
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {cellDash(user.blood_group)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {cellDash(user.reference_1_name)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {cellDash(user.reference_1_mobile)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {cellDash(user.reference_2_name)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {cellDash(user.reference_2_mobile)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {formatUserRolesCell(user.user_roles)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {formatDateTime(user.created_at)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {formatDateTime(user.last_active_at)}
+                          </td>
+                          <td
+                            className="whitespace-nowrap px-4 py-3 text-center"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <button
+                              type="button"
                               disabled={updatingUserId === user.id}
                               onClick={() =>
-                                toggleUserStatus(user.id, user.status ?? false)
+                                updateWelcome(
+                                  user.id,
+                                  !Boolean(user.welcome_completed),
+                                )
                               }
                               className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
-                                user.status ? "bg-emerald-500" : "bg-slate-300"
-                              } ${
-                                updatingUserId === user.id
-                                  ? "cursor-not-allowed opacity-70"
-                                  : ""
+                                user.welcome_completed
+                                  ? "bg-emerald-500"
+                                  : "bg-slate-300"
+                              }`}
+                              title={
+                                user.welcome_completed
+                                  ? "Welcome completed"
+                                  : "Welcome pending"
+                              }
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                                  user.welcome_completed
+                                    ? "translate-x-6"
+                                    : "translate-x-1"
+                                }`}
+                              />
+                            </button>
+                          </td>
+                          <td
+                            className="min-w-[180px] px-4 py-3"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="text"
+                              value={
+                                remarksDrafts[user.id] ??
+                                user.admin_remarks ??
+                                ""
+                              }
+                              disabled={updatingUserId === user.id}
+                              onChange={(e) =>
+                                setRemarksDrafts((prev) => ({
+                                  ...prev,
+                                  [user.id]: e.target.value,
+                                }))
+                              }
+                              onBlur={(e) =>
+                                updateRemarks(user.id, e.target.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                              placeholder="Add remarks..."
+                              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-800"
+                            />
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                            {user.requirement_count ?? 0}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                            {user.exchange_count ?? 0}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                            {user.availability_count ?? 0}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                            {user.driver_requirement_count ?? 0}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                            {user.total_posts ?? 0}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                            {user.trips_assigned_by ?? 0}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                            {user.trips_assigned_to ?? 0}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                            {user.trip_points ?? 0}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center">
+                            {(() => {
+                              const status = getMembershipStatus(user);
+                              return (
+                                <span
+                                  className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                                    status === "Active"
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : status === "Expired"
+                                        ? "bg-red-100 text-red-700"
+                                        : "bg-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {status}
+                                </span>
+                              );
+                            })()}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center">
+                            <button
+                              type="button"
+                              className="admin-btn admin-btn-secondary"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void showMembershipHistory(user);
+                              }}
+                            >
+                              View
+                            </button>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                            {user.rating_average != null
+                              ? Number(user.rating_average).toFixed(2)
+                              : "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                            {user.membership_started_at
+                              ? new Date(
+                                  user.membership_started_at,
+                                ).toLocaleDateString()
+                              : "-"}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                            {user.membership_expires_at
+                              ? new Date(
+                                  user.membership_expires_at,
+                                ).toLocaleDateString()
+                              : "-"}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                user.verified
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-amber-100 text-amber-700"
                               }`}
                             >
-                              {updatingUserId === user.id ? (
-                                <span className="mx-auto h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                              ) : (
-                                <span
-                                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
-                                    user.status
-                                      ? "translate-x-6"
-                                      : "translate-x-1"
-                                  }`}
-                                />
-                              )}
-                            </button>
-
-                            <button
-                              onClick={() => deleteUser(user.id)}
-                              className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                              {user.verified ? "Verified" : "Pending"}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center">
+                            {updatingUserId === user.id ? (
+                              <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
+                                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
+                                Updating...
+                              </span>
+                            ) : (
+                              <span
+                                className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                  user.status
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : "bg-red-100 text-red-700"
+                                }`}
+                              >
+                                {user.status ? "ON" : "OFF"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <div
+                              className="flex items-center gap-2"
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : activeTab === "birthday-date" ? (
-        <>
-          <div className="admin-card mb-5 p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="admin-eyebrow">🎂 Birthday Notifications</p>
-                <h2 className="admin-section-title mt-1">
-                  Push notifications for today&apos;s birthdays
-                </h2>
-                <p className="admin-caption mt-1 max-w-2xl">
-                  Automatically notify all app users when someone has a birthday
-                  today. Uses the same FCM channel/sound as Winner
-                  notifications. Asia/Kolkata timezone. In-app birthday popup is
-                  unchanged.
-                </p>
-              </div>
-              <span
-                className={`admin-badge ${
-                  birthdayNotifEnabled
-                    ? "admin-badge-success"
-                    : "admin-badge-neutral"
-                }`}
-              >
-                {birthdayNotifEnabled ? "● Enabled" : "○ Disabled"}
-              </span>
-            </div>
+                              <button
+                                disabled={updatingUserId === user.id}
+                                onClick={() =>
+                                  toggleUserStatus(
+                                    user.id,
+                                    user.status ?? false,
+                                  )
+                                }
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                  user.status
+                                    ? "bg-emerald-500"
+                                    : "bg-slate-300"
+                                } ${
+                                  updatingUserId === user.id
+                                    ? "cursor-not-allowed opacity-70"
+                                    : ""
+                                }`}
+                              >
+                                {updatingUserId === user.id ? (
+                                  <span className="mx-auto h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                ) : (
+                                  <span
+                                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                                      user.status
+                                        ? "translate-x-6"
+                                        : "translate-x-1"
+                                    }`}
+                                  />
+                                )}
+                              </button>
 
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
-                <p className="admin-meta">Notification Time</p>
-                <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
-                  {formatSendTimeLabel(birthdayNotifTime)}
-                </p>
-              </div>
-              <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
-                <p className="admin-meta">Timezone</p>
-                <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
-                  Asia/Kolkata
-                </p>
-              </div>
-              <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
-                <p className="admin-meta">Today&apos;s Birthdays</p>
-                <p className="mt-1 text-sm font-semibold tabular-nums text-[var(--admin-text)]">
-                  {loadingBirthdayStatus
-                    ? "…"
-                    : (birthdayNotifStatus?.todayBirthdayCount ?? "—")}
-                </p>
-              </div>
-              <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
-                <p className="admin-meta">Today&apos;s Notifications</p>
-                <p className="mt-1 text-sm font-semibold tabular-nums text-[var(--admin-text)]">
-                  {loadingBirthdayStatus
-                    ? "…"
-                    : birthdayNotifStatus
-                      ? `${birthdayNotifStatus.processed.success} / ${birthdayNotifStatus.todayBirthdayCount} processed`
-                      : "—"}
-                </p>
+                              <button
+                                onClick={() => deleteUser(user.id)}
+                                className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
-
-            <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
-                <p className="admin-meta">Last Run</p>
-                <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
-                  {birthdayNotifStatus?.lastScheduledSuccessAt
-                    ? formatDateTime(birthdayNotifStatus.lastScheduledSuccessAt)
-                    : "No scheduled success today"}
-                </p>
-              </div>
-              <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
-                <p className="admin-meta">Next Check</p>
-                <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
-                  {birthdayNotifStatus?.nextCheckLabel
-                    ? `${birthdayNotifStatus.nextCheckLabel} IST`
-                    : "—"}
-                </p>
-              </div>
-              <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
-                <p className="admin-meta">Last Failure</p>
-                <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
-                  {birthdayNotifStatus?.lastScheduledFailureAt
-                    ? formatDateTime(birthdayNotifStatus.lastScheduledFailureAt)
-                    : "None today"}
-                </p>
-                {birthdayNotifStatus?.lastScheduledFailureMessage ? (
-                  <p className="admin-caption mt-1 break-words">
-                    {birthdayNotifStatus.lastScheduledFailureMessage}
+          </>
+        ) : activeTab === "birthday-date" ? (
+          <>
+            <div className="admin-card mb-5 p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="admin-eyebrow">🎂 Birthday Notifications</p>
+                  <h2 className="admin-section-title mt-1">
+                    Push notifications for today&apos;s birthdays
+                  </h2>
+                  <p className="admin-caption mt-1 max-w-2xl">
+                    Automatically notify all app users when someone has a
+                    birthday today. Uses the same FCM channel/sound as Winner
+                    notifications. Asia/Kolkata timezone. In-app birthday popup
+                    is unchanged.
                   </p>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="mt-5 flex flex-wrap items-end gap-4">
-              <div>
-                <p className="admin-label">Send Birthday Notifications</p>
-                <button
-                  type="button"
-                  onClick={() => setBirthdayNotifEnabled((v) => !v)}
-                  className={`admin-btn ${
+                </div>
+                <span
+                  className={`admin-badge ${
                     birthdayNotifEnabled
-                      ? "admin-btn-success"
-                      : "admin-btn-secondary"
+                      ? "admin-badge-success"
+                      : "admin-badge-neutral"
                   }`}
                 >
-                  {birthdayNotifEnabled ? "Enabled" : "Disabled"}
-                </button>
+                  {birthdayNotifEnabled ? "● Enabled" : "○ Disabled"}
+                </span>
               </div>
-              <div>
-                <label htmlFor="birthday-notif-time" className="admin-label">
-                  Send Time (Asia/Kolkata)
-                </label>
-                <input
-                  id="birthday-notif-time"
-                  type="time"
-                  value={birthdayNotifTime}
-                  onChange={(e) => setBirthdayNotifTime(e.target.value)}
-                  className="admin-input w-40"
-                />
-              </div>
-            </div>
 
-            {birthdayNotifMessage ? (
-              <p className="mt-3 text-sm font-medium text-[var(--admin-accent)]">
-                {birthdayNotifMessage}
-              </p>
-            ) : null}
-            {birthdayTestMessage ? (
-              <p className="mt-2 text-sm font-medium text-[var(--admin-text-secondary)]">
-                {birthdayTestMessage}
-              </p>
-            ) : null}
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              <AdminButton
-                variant="primary"
-                loading={savingBirthdayNotif}
-                onClick={() => void saveBirthdayNotificationSettings()}
-              >
-                Save Changes
-              </AdminButton>
-              <AdminButton
-                variant="secondary"
-                loading={sendingBirthdayTest}
-                onClick={() => void sendBirthdayTestNotification()}
-              >
-                Send Test Notification
-              </AdminButton>
-              <AdminButton
-                variant="ghost"
-                loading={loadingBirthdayStatus}
-                onClick={() => void loadBirthdayNotificationStatus()}
-              >
-                Refresh Status
-              </AdminButton>
-            </div>
-          </div>
-
-          <div className="mb-4">
-            {dobEdit ? <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => { if (!dobSaving) setDobEdit(null); }}>
-              <div role="dialog" aria-modal="true" aria-label="Edit date of birth" className="admin-card w-full max-w-md space-y-4 p-5" onClick={e => e.stopPropagation()}>
-                <h3 className="text-lg font-semibold">{dobEdit.date ? "Edit DOB" : "Add DOB"} — {dobEdit.name}</h3>
-                <label className="block text-sm font-medium">Date of birth
-                  <input className="admin-input mt-2" type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={dobEdit.date} onChange={e => setDobEdit(prev => prev ? { ...prev, date: e.target.value } : null)} />
-                </label>
-                {dobError ? <p role="alert" className="text-sm text-red-600">{dobError}</p> : null}
-                <div className="flex justify-end gap-2">
-                  <button type="button" disabled={dobSaving} className="admin-btn admin-btn-secondary" onClick={() => setDobEdit(null)}>Cancel</button>
-                  <button type="button" disabled={dobSaving || !dobEdit.date} className="admin-btn admin-btn-primary" onClick={() => void saveDob()}>{dobSaving ? "Saving..." : "Save DOB"}</button>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
+                  <p className="admin-meta">Notification Time</p>
+                  <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
+                    {formatSendTimeLabel(birthdayNotifTime)}
+                  </p>
+                </div>
+                <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
+                  <p className="admin-meta">Timezone</p>
+                  <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
+                    Asia/Kolkata
+                  </p>
+                </div>
+                <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
+                  <p className="admin-meta">Today&apos;s Birthdays</p>
+                  <p className="mt-1 text-sm font-semibold tabular-nums text-[var(--admin-text)]">
+                    {loadingBirthdayStatus
+                      ? "…"
+                      : (birthdayNotifStatus?.todayBirthdayCount ?? "—")}
+                  </p>
+                </div>
+                <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
+                  <p className="admin-meta">Today&apos;s Notifications</p>
+                  <p className="mt-1 text-sm font-semibold tabular-nums text-[var(--admin-text)]">
+                    {loadingBirthdayStatus
+                      ? "…"
+                      : birthdayNotifStatus
+                        ? `${birthdayNotifStatus.processed.success} / ${birthdayNotifStatus.todayBirthdayCount} processed`
+                        : "—"}
+                  </p>
                 </div>
               </div>
-            </div> : null}
-            <h2 className="text-lg font-bold text-slate-900">Birthday Date</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Search and filter users by signup Date of Birth (
-              <code className="text-xs">birth_date</code>).
-            </p>
-          </div>
 
-          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-wrap items-center gap-3">
-              <input
-                type="text"
-                placeholder="Search users..."
-                value={birthdaySearch}
-                onChange={(e) => setBirthdaySearch(e.target.value)}
-                className="h-11 w-72 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 placeholder:text-slate-400"
-              />
+              <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
+                  <p className="admin-meta">Last Run</p>
+                  <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
+                    {birthdayNotifStatus?.lastScheduledSuccessAt
+                      ? formatDateTime(
+                          birthdayNotifStatus.lastScheduledSuccessAt,
+                        )
+                      : "No scheduled success today"}
+                  </p>
+                </div>
+                <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
+                  <p className="admin-meta">Next Check</p>
+                  <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
+                    {birthdayNotifStatus?.nextCheckLabel
+                      ? `${birthdayNotifStatus.nextCheckLabel} IST`
+                      : "—"}
+                  </p>
+                </div>
+                <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
+                  <p className="admin-meta">Last Failure</p>
+                  <p className="mt-1 text-sm font-semibold text-[var(--admin-text)]">
+                    {birthdayNotifStatus?.lastScheduledFailureAt
+                      ? formatDateTime(
+                          birthdayNotifStatus.lastScheduledFailureAt,
+                        )
+                      : "None today"}
+                  </p>
+                  {birthdayNotifStatus?.lastScheduledFailureMessage ? (
+                    <p className="admin-caption mt-1 break-words">
+                      {birthdayNotifStatus.lastScheduledFailureMessage}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
 
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="whitespace-nowrap">Specific date</span>
-                <input
-                  type="date"
-                  value={birthdayExactDate}
-                  onChange={(e) => setBirthdayExactDate(e.target.value)}
-                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-                />
-              </label>
+              <div className="mt-5 flex flex-wrap items-end gap-4">
+                <div>
+                  <p className="admin-label">Send Birthday Notifications</p>
+                  <button
+                    type="button"
+                    onClick={() => setBirthdayNotifEnabled((v) => !v)}
+                    className={`admin-btn ${
+                      birthdayNotifEnabled
+                        ? "admin-btn-success"
+                        : "admin-btn-secondary"
+                    }`}
+                  >
+                    {birthdayNotifEnabled ? "Enabled" : "Disabled"}
+                  </button>
+                </div>
+                <div>
+                  <label htmlFor="birthday-notif-time" className="admin-label">
+                    Send Time (Asia/Kolkata)
+                  </label>
+                  <input
+                    id="birthday-notif-time"
+                    type="time"
+                    value={birthdayNotifTime}
+                    onChange={(e) => setBirthdayNotifTime(e.target.value)}
+                    className="admin-input w-40"
+                  />
+                </div>
+              </div>
 
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="whitespace-nowrap">From</span>
-                <input
-                  type="date"
-                  value={birthdayFromDate}
-                  onChange={(e) => setBirthdayFromDate(e.target.value)}
-                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-                />
-              </label>
+              {birthdayNotifMessage ? (
+                <p className="mt-3 text-sm font-medium text-[var(--admin-accent)]">
+                  {birthdayNotifMessage}
+                </p>
+              ) : null}
+              {birthdayTestMessage ? (
+                <p className="mt-2 text-sm font-medium text-[var(--admin-text-secondary)]">
+                  {birthdayTestMessage}
+                </p>
+              ) : null}
 
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="whitespace-nowrap">To</span>
-                <input
-                  type="date"
-                  value={birthdayToDate}
-                  onChange={(e) => setBirthdayToDate(e.target.value)}
-                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-                />
-              </label>
-
-              <select
-                value={birthdayPreset}
-                onChange={(e) =>
-                  setBirthdayPreset(e.target.value as BirthdayPresetFilter)
-                }
-                className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-              >
-                <option value="all">All</option>
-                <option value="today">Today&apos;s Birthday</option>
-                <option value="this_month">This Month</option>
-                <option value="not_set">Date of Birth Not Set</option>
-              </select>
-
-              <select
-                value={birthdaySort}
-                onChange={(e) =>
-                  setBirthdaySort(e.target.value as BirthdaySortKey)
-                }
-                className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
-              >
-                <option value="dob_oldest">DOB: Oldest → Newest</option>
-                <option value="dob_newest">DOB: Newest → Oldest</option>
-              </select>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setBirthdaySearch("");
-                  setBirthdayExactDate("");
-                  setBirthdayFromDate("");
-                  setBirthdayToDate("");
-                  setBirthdayPreset("all");
-                  setBirthdaySort("dob_oldest");
-                  setBirthdayPage(1);
-                }}
-                className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-white"
-              >
-                Reset
-              </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <AdminButton
+                  variant="primary"
+                  loading={savingBirthdayNotif}
+                  onClick={() => void saveBirthdayNotificationSettings()}
+                >
+                  Save Changes
+                </AdminButton>
+                <AdminButton
+                  variant="secondary"
+                  loading={sendingBirthdayTest}
+                  onClick={() => void sendBirthdayTestNotification()}
+                >
+                  Send Test Notification
+                </AdminButton>
+                <AdminButton
+                  variant="ghost"
+                  loading={loadingBirthdayStatus}
+                  onClick={() => void loadBirthdayNotificationStatus()}
+                >
+                  Refresh Status
+                </AdminButton>
+              </div>
             </div>
-          </div>
 
-          <div className="mb-3 text-sm text-slate-600">
-            Showing {paginatedBirthdayUsers.length} of{" "}
-            {filteredBirthdayUsers.length} users
-            {birthdayPreset === "today"
-              ? ` · Today (${toDateInputValue(new Date())})`
-              : ""}
-          </div>
-
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="admin-table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Name
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Email
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Phone
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Date of Birth
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Plan
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Verification
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Edit DOB
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Account Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {paginatedBirthdayUsers.length === 0 ? (
-                    <tr>
-                      <td
-                        className="px-4 py-10 text-center text-slate-500"
-                        colSpan={8}
-                      >
-                        No users found.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedBirthdayUsers.map((user) => (
-                      <tr
-                        key={user.id}
-                        onClick={() =>
-                          router.push(
-                            `/dashboard/users/${user.id}?tab=birthday-date`,
+            <div className="mb-4">
+              {dobEdit ? (
+                <div
+                  className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4"
+                  role="presentation"
+                  onClick={() => {
+                    if (!dobSaving) setDobEdit(null);
+                  }}
+                >
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Edit date of birth"
+                    className="admin-card w-full max-w-md space-y-4 p-5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <h3 className="text-lg font-semibold">
+                      {dobEdit.date ? "Edit DOB" : "Add DOB"} — {dobEdit.name}
+                    </h3>
+                    <label className="block text-sm font-medium">
+                      Date of birth
+                      <input
+                        className="admin-input mt-2"
+                        type="date"
+                        min="1900-01-01"
+                        max={new Date().toISOString().slice(0, 10)}
+                        value={dobEdit.date}
+                        onChange={(e) =>
+                          setDobEdit((prev) =>
+                            prev ? { ...prev, date: e.target.value } : null,
                           )
                         }
-                        className="cursor-pointer transition-all hover:bg-slate-50"
+                      />
+                    </label>
+                    {dobError ? (
+                      <p role="alert" className="text-sm text-red-600">
+                        {dobError}
+                      </p>
+                    ) : null}
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={dobSaving}
+                        className="admin-btn admin-btn-secondary"
+                        onClick={() => setDobEdit(null)}
                       >
-                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                          {`${user.first_name ?? ""} ${user.last_name ?? ""}`.trim() ||
-                            "-"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {cellDash(user.email)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                          {cellDash(user.phone)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatBirthDateCell(user.birth_date)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatMembership(
-                            user.membership_type === "gold" ||
-                              user.membership_type === "silver" ||
-                              user.membership_type === "platinum"
-                              ? user.membership_type
-                              : "regular",
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                              user.verified
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-amber-50 text-amber-700"
-                            }`}
-                          >
-                            {user.verified ? "Verified" : "Pending"}
-                          </span>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <button type="button" className="admin-btn admin-btn-secondary" onClick={(event) => {
-                            event.stopPropagation();
-                            setDobEdit({ id: user.id, name: [user.first_name, user.last_name].filter(Boolean).join(" ") || "User", date: dobOverrides[user.id] ?? user.birth_date ?? "" });
-                            setDobError("");
-                          }}>{(dobOverrides[user.id] ?? user.birth_date) ? "Edit DOB" : "Add DOB"}</button>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-center">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                              user.status
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-slate-100 text-slate-600"
-                            }`}
-                          >
-                            {user.status ? "ON" : "OFF"}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {filteredBirthdayUsers.length > BIRTHDAY_PAGE_SIZE ? (
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-slate-600">
-                Page {birthdayPageSafe} of {birthdayTotalPages}
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={dobSaving || !dobEdit.date}
+                        className="admin-btn admin-btn-primary"
+                        onClick={() => void saveDob()}
+                      >
+                        {dobSaving ? "Saving..." : "Save DOB"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              <h2 className="text-lg font-bold text-slate-900">
+                Birthday Date
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Search and filter users by signup Date of Birth (
+                <code className="text-xs">birth_date</code>).
               </p>
-              <div className="flex gap-2">
+            </div>
+
+            <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  type="text"
+                  placeholder="Search users..."
+                  value={birthdaySearch}
+                  onChange={(e) => setBirthdaySearch(e.target.value)}
+                  className="h-11 w-72 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 placeholder:text-slate-400"
+                />
+
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="whitespace-nowrap">Specific date</span>
+                  <input
+                    type="date"
+                    value={birthdayExactDate}
+                    onChange={(e) => setBirthdayExactDate(e.target.value)}
+                    className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                  />
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="whitespace-nowrap">From</span>
+                  <input
+                    type="date"
+                    value={birthdayFromDate}
+                    onChange={(e) => setBirthdayFromDate(e.target.value)}
+                    className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                  />
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="whitespace-nowrap">To</span>
+                  <input
+                    type="date"
+                    value={birthdayToDate}
+                    onChange={(e) => setBirthdayToDate(e.target.value)}
+                    className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                  />
+                </label>
+
+                <select
+                  value={birthdayPreset}
+                  onChange={(e) =>
+                    setBirthdayPreset(e.target.value as BirthdayPresetFilter)
+                  }
+                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                >
+                  <option value="all">All</option>
+                  <option value="today">Today&apos;s Birthday</option>
+                  <option value="this_month">This Month</option>
+                  <option value="not_set">Date of Birth Not Set</option>
+                </select>
+
+                <select
+                  value={birthdaySort}
+                  onChange={(e) =>
+                    setBirthdaySort(e.target.value as BirthdaySortKey)
+                  }
+                  className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
+                >
+                  <option value="dob_oldest">DOB: Oldest → Newest</option>
+                  <option value="dob_newest">DOB: Newest → Oldest</option>
+                </select>
+
                 <button
                   type="button"
-                  disabled={birthdayPageSafe <= 1}
-                  onClick={() =>
-                    setBirthdayPage((page) => Math.max(1, page - 1))
-                  }
-                  className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => {
+                    setBirthdaySearch("");
+                    setBirthdayExactDate("");
+                    setBirthdayFromDate("");
+                    setBirthdayToDate("");
+                    setBirthdayPreset("all");
+                    setBirthdaySort("dob_oldest");
+                    setBirthdayPage(1);
+                  }}
+                  className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-white"
                 >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  disabled={birthdayPageSafe >= birthdayTotalPages}
-                  onClick={() =>
-                    setBirthdayPage((page) =>
-                      Math.min(birthdayTotalPages, page + 1),
-                    )
-                  }
-                  className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Next
+                  Reset
                 </button>
               </div>
             </div>
-          ) : null}
-        </>
-      ) : activeTab === "requirements" ? (
-        <>
-          <div className="mb-4 flex justify-end">
-            <button
-              type="button"
-              onClick={exportRequirements}
-              disabled={exportingRequirements}
-              className="h-11 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {exportingRequirements ? "Exporting..." : "Export to Excel"}
-            </button>
-          </div>
-          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center gap-3 overflow-x-auto pb-1">
-              <input
-                type="text"
-                placeholder="Search User / Phone / City"
-                value={reqSearch}
-                onChange={(e) => setReqSearch(e.target.value)}
-                className="h-11 w-72 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 placeholder:text-slate-400"
-              />
-              <select
-                value={reqStatus}
-                onChange={(e) => setReqStatus(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              >
-                <option value="all">All Status</option>
-                <option value="booked">Booked</option>
-                <option value="pending">Pending</option>
-              </select>
-              <select
-                value={reqCarType}
-                onChange={(e) => setReqCarType(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              >
-                <option value="all">All Cars</option>
 
-                {requirementCarTypes.map((car) => (
-                  <option key={car} value={car}>
-                    {car}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={reqTripType}
-                onChange={(e) => setReqTripType(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              >
-                <option value="all">All Trips</option>
-                <option value="one_way">One Way</option>
-                <option value="two_way">Two Way</option>
-              </select>
-              <select
-                value={reqSourceCity}
-                onChange={(e) => setReqSourceCity(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              >
-                <option value="all">All Sources</option>
+            <div className="mb-3 text-sm text-slate-600">
+              Showing {paginatedBirthdayUsers.length} of{" "}
+              {filteredBirthdayUsers.length} users
+              {birthdayPreset === "today"
+                ? ` · Today (${toDateInputValue(new Date())})`
+                : ""}
+            </div>
 
-                {cityOptions.map((city) => (
-                  <option key={city} value={city}>
-                    {city}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={reqDestinationCity}
-                onChange={(e) => setReqDestinationCity(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              >
-                <option value="all">All Destinations</option>
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Name
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Email
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Phone
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Date of Birth
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Plan
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Verification
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Edit DOB
+                      </th>
+                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Account Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {paginatedBirthdayUsers.length === 0 ? (
+                      <tr>
+                        <td
+                          className="px-4 py-10 text-center text-slate-500"
+                          colSpan={8}
+                        >
+                          No users found.
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedBirthdayUsers.map((user) => (
+                        <tr
+                          key={user.id}
+                          onClick={() =>
+                            router.push(
+                              `/dashboard/users/${user.id}?tab=birthday-date`,
+                            )
+                          }
+                          className="cursor-pointer transition-all hover:bg-slate-50"
+                        >
+                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                            {`${user.first_name ?? ""} ${user.last_name ?? ""}`.trim() ||
+                              "-"}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                            {cellDash(user.email)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                            {cellDash(user.phone)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {formatBirthDateCell(user.birth_date)}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {formatMembership(
+                              user.membership_type === "gold" ||
+                                user.membership_type === "silver" ||
+                                user.membership_type === "platinum"
+                                ? user.membership_type
+                                : "regular",
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                user.verified
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-amber-50 text-amber-700"
+                              }`}
+                            >
+                              {user.verified ? "Verified" : "Pending"}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <button
+                              type="button"
+                              className="admin-btn admin-btn-secondary"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setDobEdit({
+                                  id: user.id,
+                                  name:
+                                    [user.first_name, user.last_name]
+                                      .filter(Boolean)
+                                      .join(" ") || "User",
+                                  date:
+                                    dobOverrides[user.id] ??
+                                    user.birth_date ??
+                                    "",
+                                });
+                                setDobError("");
+                              }}
+                            >
+                              {(dobOverrides[user.id] ?? user.birth_date)
+                                ? "Edit DOB"
+                                : "Add DOB"}
+                            </button>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-center">
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                user.status
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {user.status ? "ON" : "OFF"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-                {cityOptions.map((city) => (
-                  <option key={city} value={city}>
-                    {city}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="date"
-                value={reqFromDate}
-                onChange={(e) => setReqFromDate(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              />
-
-              <input
-                type="date"
-                value={reqToDate}
-                onChange={(e) => setReqToDate(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              />
-
+            {filteredBirthdayUsers.length > BIRTHDAY_PAGE_SIZE ? (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-slate-600">
+                  Page {birthdayPageSafe} of {birthdayTotalPages}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={birthdayPageSafe <= 1}
+                    onClick={() =>
+                      setBirthdayPage((page) => Math.max(1, page - 1))
+                    }
+                    className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={birthdayPageSafe >= birthdayTotalPages}
+                    onClick={() =>
+                      setBirthdayPage((page) =>
+                        Math.min(birthdayTotalPages, page + 1),
+                      )
+                    }
+                    className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : activeTab === "requirements" ? (
+          <>
+            <div className="mb-4 flex justify-end">
               <button
-                onClick={() => {
-                  setReqSearch("");
-                  setReqStatus("all");
-                  setReqCarType("all");
-                  setReqTripType("all");
-                  setReqSourceCity("all");
-                  setReqDestinationCity("all");
-                  setReqFromDate("");
-                  setReqToDate("");
-                }}
-                className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-sm font-semibold text-white hover:bg-red-600"
+                type="button"
+                onClick={exportRequirements}
+                disabled={exportingRequirements}
+                className="h-11 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                Reset
+                {exportingRequirements ? "Exporting..." : "Export to Excel"}
               </button>
             </div>
-          </div>
+            <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-3 overflow-x-auto pb-1">
+                <input
+                  type="text"
+                  placeholder="Search User / Phone / City"
+                  value={reqSearch}
+                  onChange={(e) => setReqSearch(e.target.value)}
+                  className="h-11 w-72 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 placeholder:text-slate-400"
+                />
+                <select
+                  value={reqStatus}
+                  onChange={(e) => setReqStatus(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                >
+                  <option value="all">All Status</option>
+                  <option value="booked">Booked</option>
+                  <option value="pending">Pending</option>
+                </select>
+                <select
+                  value={reqCarType}
+                  onChange={(e) => setReqCarType(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                >
+                  <option value="all">All Cars</option>
 
-          <div className="admin-table-wrap"></div>
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="min-w-full table-auto">
-                <thead className="bg-slate-100">
-                  <tr>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      User
-                    </th>
+                  {requirementCarTypes.map((car) => (
+                    <option key={car} value={car}>
+                      {car}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={reqTripType}
+                  onChange={(e) => setReqTripType(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                >
+                  <option value="all">All Trips</option>
+                  <option value="one_way">One Way</option>
+                  <option value="two_way">Two Way</option>
+                </select>
+                <select
+                  value={reqSourceCity}
+                  onChange={(e) => setReqSourceCity(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                >
+                  <option value="all">All Sources</option>
 
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Phone
-                    </th>
+                  {cityOptions.map((city) => (
+                    <option key={city} value={city}>
+                      {city}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={reqDestinationCity}
+                  onChange={(e) => setReqDestinationCity(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                >
+                  <option value="all">All Destinations</option>
 
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Source
-                    </th>
+                  {cityOptions.map((city) => (
+                    <option key={city} value={city}>
+                      {city}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="date"
+                  value={reqFromDate}
+                  onChange={(e) => setReqFromDate(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                />
 
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Destination
-                    </th>
+                <input
+                  type="date"
+                  value={reqToDate}
+                  onChange={(e) => setReqToDate(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                />
 
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Car Type
-                    </th>
+                <button
+                  onClick={() => {
+                    setReqSearch("");
+                    setReqStatus("all");
+                    setReqCarType("all");
+                    setReqTripType("all");
+                    setReqSourceCity("all");
+                    setReqDestinationCity("all");
+                    setReqFromDate("");
+                    setReqToDate("");
+                  }}
+                  className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-sm font-semibold text-white hover:bg-red-600"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
 
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Trip Type
-                    </th>
-
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Price
-                    </th>
-
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Journey Start
-                    </th>
-
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Status
-                    </th>
-
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Booked By
-                    </th>
-
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Driver Phone
-                    </th>
-
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Created
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {requirements?.length === 0 ? (
+            <div className="admin-table-wrap"></div>
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="min-w-full table-auto">
+                  <thead className="bg-slate-100">
                     <tr>
-                      <td
-                        colSpan={5}
-                        className="px-6 py-10 text-center text-slate-500"
-                      >
-                        No requirements found.
-                      </td>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        User
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Phone
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Source
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Destination
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Car Type
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Trip Type
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Price
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Journey Start
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Status
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Booked By
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Driver Phone
+                      </th>
+
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Created
+                      </th>
                     </tr>
-                  ) : (
-                    filteredRequirements.map((item) => (
-                      <tr key={item.id} className="border-t hover:bg-slate-50">
+                  </thead>
+
+                  <tbody>
+                    {requirements?.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-6 py-10 text-center text-slate-500"
+                        >
+                          No requirements found.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredRequirements.map((item) => (
+                        <tr
+                          key={item.id}
+                          className="border-t hover:bg-slate-50"
+                        >
+                          <td className="px-6 py-4 font-semibold text-slate-900">
+                            {item.users?.first_name} {item.users?.last_name}
+                          </td>
+
+                          <td className="px-6 py-4 text-slate-700">
+                            {item.users?.phone}
+                          </td>
+
+                          <td className="px-6 py-4 text-slate-700">
+                            {item.source_city}, {item.source_state}
+                          </td>
+
+                          <td className="px-6 py-4 text-slate-700">
+                            {item.destination_city}, {item.destination_state}
+                          </td>
+
+                          <td className="px-6 py-4 text-slate-700">
+                            {item.car_type}
+                          </td>
+
+                          <td className="px-6 py-4 text-slate-700">
+                            {item.trip_type}
+                          </td>
+
+                          <td className="px-6 py-4 text-slate-700">
+                            ₹{item.price}
+                          </td>
+
+                          <td className="px-6 py-4 text-slate-700">
+                            {new Date(item.journey_start_at).toLocaleString()}
+                          </td>
+
+                          <td>
+                            {item.booked ? (
+                              <span className="rounded bg-green-100 px-2 py-1 text-green-700 font-semibold">
+                                Booked
+                              </span>
+                            ) : (
+                              <span className="rounded bg-red-100 px-2 py-1 text-red-700 font-semibold">
+                                Pending
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="px-6 py-4 font-semibold text-slate-900">
+                            {item.assigned_user
+                              ? `${item.assigned_user.first_name} ${item.assigned_user.last_name}`
+                              : "-"}
+                          </td>
+
+                          <td className="px-6 py-4 font-medium text-slate-900">
+                            {item.assigned_user?.phone ?? "-"}
+                          </td>
+
+                          <td className="px-6 py-4 text-slate-500">
+                            {new Date(item.created_at).toLocaleDateString()}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : activeTab === "exchanges" ? (
+          <>
+            <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-3 overflow-x-auto pb-1">
+                <input
+                  type="text"
+                  placeholder="Search User / Phone / City"
+                  value={exchangeSearch}
+                  onChange={(e) => setExchangeSearch(e.target.value)}
+                  className="h-11 w-72 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 placeholder:text-slate-500"
+                />
+
+                <select
+                  value={exchangeStatus}
+                  onChange={(e) => setExchangeStatus(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                >
+                  <option value="all">All Status</option>
+                  <option value="booked">Exchanged</option>
+                  <option value="pending">Pending</option>
+                </select>
+
+                <select
+                  value={exchangeCarType}
+                  onChange={(e) => setExchangeCarType(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                >
+                  <option value="all">All Cars</option>
+
+                  {exchangeCarTypes.map((car) => (
+                    <option key={car} value={car}>
+                      {car}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={exchangeSourceCity}
+                  onChange={(e) => setExchangeSourceCity(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                >
+                  <option value="all">All Sources</option>
+
+                  {cityOptions.map((city) => (
+                    <option key={city} value={city}>
+                      {city}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={exchangeDestinationCity}
+                  onChange={(e) => setExchangeDestinationCity(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                >
+                  <option value="all">All Destinations</option>
+
+                  {cityOptions.map((city) => (
+                    <option key={city} value={city}>
+                      {city}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="date"
+                  value={exchangeFromDate}
+                  onChange={(e) => setExchangeFromDate(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                />
+
+                <input
+                  type="date"
+                  value={exchangeToDate}
+                  onChange={(e) => setExchangeToDate(e.target.value)}
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
+                />
+
+                <button
+                  onClick={() => {
+                    setReqSearch("");
+                    setReqStatus("all");
+                    setReqCarType("all");
+                    setReqTripType("all");
+                    setReqSourceCity("all");
+                    setReqDestinationCity("all");
+                    setReqFromDate("");
+                    setReqToDate("");
+                  }}
+                  className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-sm font-semibold text-white hover:bg-red-600"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="min-w-full table-auto">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        User
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Phone
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Available Route
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Available Car
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Expected Route
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Expected Car
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Status
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Exchanged To
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Driver Phone
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Created
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {filteredExchanges?.map((item) => (
+                      <tr key={item.id} className="border-t">
                         <td className="px-6 py-4 font-semibold text-slate-900">
                           {item.users?.first_name} {item.users?.last_name}
                         </td>
@@ -4559,33 +5113,27 @@ export function DashboardTabs({
                         </td>
 
                         <td className="px-6 py-4 text-slate-700">
-                          {item.source_city}, {item.source_state}
+                          {item.available_source_city}→
+                          {item.available_destination_city}
                         </td>
 
                         <td className="px-6 py-4 text-slate-700">
-                          {item.destination_city}, {item.destination_state}
+                          {item.available_car_type}
                         </td>
 
                         <td className="px-6 py-4 text-slate-700">
-                          {item.car_type}
+                          {item.expected_source_city}→
+                          {item.expected_destination_city}
                         </td>
 
                         <td className="px-6 py-4 text-slate-700">
-                          {item.trip_type}
+                          {item.expected_car_type}
                         </td>
 
-                        <td className="px-6 py-4 text-slate-700">
-                          ₹{item.price}
-                        </td>
-
-                        <td className="px-6 py-4 text-slate-700">
-                          {new Date(item.journey_start_at).toLocaleString()}
-                        </td>
-
-                        <td>
+                        <td className="px-6 py-4">
                           {item.booked ? (
                             <span className="rounded bg-green-100 px-2 py-1 text-green-700 font-semibold">
-                              Booked
+                              Exchanged
                             </span>
                           ) : (
                             <span className="rounded bg-red-100 px-2 py-1 text-red-700 font-semibold">
@@ -4595,1379 +5143,142 @@ export function DashboardTabs({
                         </td>
 
                         <td className="px-6 py-4 font-semibold text-slate-900">
-                          {item.assigned_user
-                            ? `${item.assigned_user.first_name} ${item.assigned_user.last_name}`
+                          {item.exchanged_user
+                            ? `${item.exchanged_user.first_name} ${item.exchanged_user.last_name}`
                             : "-"}
                         </td>
 
-                        <td className="px-6 py-4 font-medium text-slate-900">
-                          {item.assigned_user?.phone ?? "-"}
+                        <td className="px-6 py-4 text-slate-700">
+                          {item.exchanged_user?.phone ?? "-"}
                         </td>
 
-                        <td className="px-6 py-4 text-slate-500">
+                        <td className="px-6 py-4 text-slate-700">
                           {new Date(item.created_at).toLocaleDateString()}
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        </>
-      ) : activeTab === "exchanges" ? (
-        <>
-          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center gap-3 overflow-x-auto pb-1">
-              <input
-                type="text"
-                placeholder="Search User / Phone / City"
-                value={exchangeSearch}
-                onChange={(e) => setExchangeSearch(e.target.value)}
-                className="h-11 w-72 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 placeholder:text-slate-500"
-              />
-
-              <select
-                value={exchangeStatus}
-                onChange={(e) => setExchangeStatus(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              >
-                <option value="all">All Status</option>
-                <option value="booked">Exchanged</option>
-                <option value="pending">Pending</option>
-              </select>
-
-              <select
-                value={exchangeCarType}
-                onChange={(e) => setExchangeCarType(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              >
-                <option value="all">All Cars</option>
-
-                {exchangeCarTypes.map((car) => (
-                  <option key={car} value={car}>
-                    {car}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={exchangeSourceCity}
-                onChange={(e) => setExchangeSourceCity(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              >
-                <option value="all">All Sources</option>
-
-                {cityOptions.map((city) => (
-                  <option key={city} value={city}>
-                    {city}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={exchangeDestinationCity}
-                onChange={(e) => setExchangeDestinationCity(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              >
-                <option value="all">All Destinations</option>
-
-                {cityOptions.map((city) => (
-                  <option key={city} value={city}>
-                    {city}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="date"
-                value={exchangeFromDate}
-                onChange={(e) => setExchangeFromDate(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              />
-
-              <input
-                type="date"
-                value={exchangeToDate}
-                onChange={(e) => setExchangeToDate(e.target.value)}
-                className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900"
-              />
-
+          </>
+        ) : activeTab === "fraud-reports" ? (
+          <>
+            <div className="mb-4 flex justify-end">
               <button
                 onClick={() => {
-                  setReqSearch("");
-                  setReqStatus("all");
-                  setReqCarType("all");
-                  setReqTripType("all");
-                  setReqSourceCity("all");
-                  setReqDestinationCity("all");
-                  setReqFromDate("");
-                  setReqToDate("");
+                  setEditingFraudId(null);
+                  setFromUserId("");
+                  setToUserId("");
+                  setFraudReason("");
+                  setFraudDescription("");
+                  setShowFraudModal(true);
                 }}
-                className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-sm font-semibold text-white hover:bg-red-600"
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
               >
-                Reset
+                Report Fraud
               </button>
             </div>
-          </div>
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="min-w-full table-auto">
-                <thead className="bg-slate-100">
-                  <tr>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      User
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Phone
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Available Route
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Available Car
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Expected Route
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Expected Car
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Status
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Exchanged To
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Driver Phone
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Created
-                    </th>
-                  </tr>
-                </thead>
 
-                <tbody>
-                  {filteredExchanges?.map((item) => (
-                    <tr key={item.id} className="border-t">
-                      <td className="px-6 py-4 font-semibold text-slate-900">
-                        {item.users?.first_name} {item.users?.last_name}
-                      </td>
-
-                      <td className="px-6 py-4 text-slate-700">
-                        {item.users?.phone}
-                      </td>
-
-                      <td className="px-6 py-4 text-slate-700">
-                        {item.available_source_city}→
-                        {item.available_destination_city}
-                      </td>
-
-                      <td className="px-6 py-4 text-slate-700">
-                        {item.available_car_type}
-                      </td>
-
-                      <td className="px-6 py-4 text-slate-700">
-                        {item.expected_source_city}→
-                        {item.expected_destination_city}
-                      </td>
-
-                      <td className="px-6 py-4 text-slate-700">
-                        {item.expected_car_type}
-                      </td>
-
-                      <td className="px-6 py-4">
-                        {item.booked ? (
-                          <span className="rounded bg-green-100 px-2 py-1 text-green-700 font-semibold">
-                            Exchanged
-                          </span>
-                        ) : (
-                          <span className="rounded bg-red-100 px-2 py-1 text-red-700 font-semibold">
-                            Pending
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4 font-semibold text-slate-900">
-                        {item.exchanged_user
-                          ? `${item.exchanged_user.first_name} ${item.exchanged_user.last_name}`
-                          : "-"}
-                      </td>
-
-                      <td className="px-6 py-4 text-slate-700">
-                        {item.exchanged_user?.phone ?? "-"}
-                      </td>
-
-                      <td className="px-6 py-4 text-slate-700">
-                        {new Date(item.created_at).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : activeTab === "fraud-reports" ? (
-        <>
-          <div className="mb-4 flex justify-end">
-            <button
-              onClick={() => {
-                setEditingFraudId(null);
-                setFromUserId("");
-                setToUserId("");
-                setFraudReason("");
-                setFraudDescription("");
-                setShowFraudModal(true);
-              }}
-              className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-            >
-              Report Fraud
-            </button>
-          </div>
-
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="admin-table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Reporter
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Reported User
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Reason
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Description
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Date
-                    </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-800">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {(fraudReports ?? []).length === 0 ? (
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
                     <tr>
-                      <td
-                        colSpan={6}
-                        className="px-4 py-10 text-center text-slate-500"
-                      >
-                        No fraud reports found.
-                      </td>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Reporter
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Reported User
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Reason
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Description
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Date
+                      </th>
+                      <th className="px-6 py-4 text-left font-bold text-slate-800">
+                        Actions
+                      </th>
                     </tr>
-                  ) : (
-                    (fraudReports ?? []).map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-50">
-                        <td className="px-6 py-4 text-slate-700">
-                          {item.from_user?.first_name}
-                        </td>
+                  </thead>
 
-                        <td className="px-6 py-4 text-slate-700">
-                          {item.to_user?.first_name}
-                        </td>
-
-                        <td className="px-6 py-4 text-slate-700">
-                          {item.reason}
-                        </td>
-
-                        <td className="px-6 py-4 text-slate-700">
-                          {item.description || "-"}
-                        </td>
-
-                        <td className="px-6 py-4 text-slate-700">
-                          {new Date(item.created_at).toLocaleDateString()}
-                        </td>
-
-                        <td className="px-6 py-4">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => {
-                                setEditingFraudId(item.id);
-
-                                setFromUserId(item.from_user_id);
-                                setToUserId(item.to_user_id);
-
-                                setFraudReason(item.reason);
-                                setFraudDescription(item.description || "");
-
-                                setShowFraudModal(true);
-                              }}
-                              className="rounded bg-amber-100 px-3 py-1 text-amber-700"
-                            >
-                              Edit
-                            </button>
-
-                            <button
-                              onClick={() => deleteFraud(item.id)}
-                              className="rounded bg-red-100 px-3 py-1 text-red-700"
-                            >
-                              Delete
-                            </button>
-                          </div>
+                  <tbody>
+                    {(fraudReports ?? []).length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          className="px-4 py-10 text-center text-slate-500"
+                        >
+                          No fraud reports found.
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : activeTab === "sliders" ? (
-        <>
-          <div className="mb-4 flex justify-end">
-            <button
-              onClick={() => {
-                setEditingSliderId(null);
-
-                setSliderImage("");
-
-                setSliderMediaType("image");
-
-                setSliderStatus(true);
-
-                setShowSliderModal(true);
-              }}
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              Add Slider
-            </button>
-          </div>
-
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="admin-table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Media
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Type
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Status
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Display Order
-                    </th>
-
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-
-                <DragDropContext onDragEnd={onSliderDragEnd}>
-                  <Droppable droppableId="sliders">
-                    {(provided) => (
-                      <tbody
-                        ref={provided.innerRef}
-                        {...provided.droppableProps}
-                        className="divide-y divide-slate-100"
-                      >
-                        {sliders?.length === 0 ? (
-                          <tr>
-                            <td
-                              className="px-4 py-10 text-center text-slate-500"
-                              colSpan={5}
-                            >
-                              No sliders found.
-                            </td>
-                          </tr>
-                        ) : (
-                          sliderList.map((slider, index) => (
-                            <Draggable
-                              key={slider.id}
-                              draggableId={slider.id}
-                              index={index}
-                            >
-                              {(provided) => (
-                                <tr
-                                  ref={provided.innerRef}
-                                  {...provided.draggableProps}
-                                  {...provided.dragHandleProps}
-                                  className="hover:bg-slate-50 cursor-grab"
-                                >
-                                  <td className="px-4 py-3">
-                                    {slider.media_type === "video" ? (
-                                      <video
-                                        src={slider.image}
-                                        className="aspect-[10/5] w-40 rounded-xl object-cover"
-                                        muted
-                                        playsInline
-                                        preload="metadata"
-                                      />
-                                    ) : (
-                                      <img
-                                        src={slider.image}
-                                        alt="slider"
-                                        className="aspect-[10/5] w-40 rounded-xl object-cover"
-                                      />
-                                    )}
-                                  </td>
-
-                                  <td className="px-4 py-3">
-                                    <span
-                                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                        slider.media_type === "video"
-                                          ? "bg-violet-100 text-violet-700"
-                                          : "bg-sky-100 text-sky-700"
-                                      }`}
-                                    >
-                                      {slider.media_type === "video"
-                                        ? "Video"
-                                        : "Image"}
-                                    </span>
-                                  </td>
-
-                                  <td className="px-4 py-3">
-                                    <span
-                                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                        slider.status
-                                          ? "bg-emerald-100 text-emerald-700"
-                                          : "bg-red-100 text-red-700"
-                                      }`}
-                                    >
-                                      {slider.status ? "Active" : "Inactive"}
-                                    </span>
-                                  </td>
-
-                                  <td className="px-4 py-3 font-bold text-slate-700">
-                                    {slider.display_order}
-                                  </td>
-
-                                  <td className="px-4 py-3">
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        onClick={() => {
-                                          setEditingSliderId(slider.id);
-                                          setSliderImage(slider.image);
-                                          setSliderMediaType(
-                                            slider.media_type === "video"
-                                              ? "video"
-                                              : "image",
-                                          );
-                                          setSliderStatus(slider.status);
-                                          setSliderOrder(slider.display_order);
-                                          setShowSliderModal(true);
-                                        }}
-                                        className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
-                                      >
-                                        Edit
-                                      </button>
-
-                                      <button
-                                        onClick={() => deleteSlider(slider.id)}
-                                        className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
-                                      >
-                                        Delete
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )}
-                            </Draggable>
-                          ))
-                        )}
-                        {provided.placeholder}
-                      </tbody>
-                    )}
-                  </Droppable>
-                </DragDropContext>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : activeTab === "priority-settings" ? (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-slate-900">
-            Priority Timeline Settings
-          </h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Durations control Requirement feed access windows in this order:
-            Diamond → Gold → Silver → Everyone. Changes apply on the next feed
-            load — no app deploy required.
-          </p>
-
-          <div className="mt-6 grid gap-5 sm:grid-cols-3">
-            <div>
-              <label className="mb-1 block text-sm font-semibold text-slate-700">
-                Diamond Priority Duration
-              </label>
-              <p className="mb-2 text-xs text-slate-500">
-                Gold membership purchased and trip_points &gt; 0
-              </p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={1440}
-                  value={diamondMinutes}
-                  onChange={(e) => setDiamondMinutes(e.target.value)}
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                />
-                <span className="text-sm font-medium text-slate-500">
-                  Minutes
-                </span>
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-semibold text-slate-700">
-                Gold Priority Duration
-              </label>
-              <p className="mb-2 text-xs text-slate-500">
-                Gold membership purchased (trip_points not required)
-              </p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={1440}
-                  value={goldMinutes}
-                  onChange={(e) => setGoldMinutes(e.target.value)}
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                />
-                <span className="text-sm font-medium text-slate-500">
-                  Minutes
-                </span>
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-semibold text-slate-700">
-                Silver Priority Duration
-              </label>
-              <p className="mb-2 text-xs text-slate-500">
-                trip_points &gt; 0 (Gold membership not required)
-              </p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={1440}
-                  value={silverMinutes}
-                  onChange={(e) => setSilverMinutes(e.target.value)}
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                />
-                <span className="text-sm font-medium text-slate-500">
-                  Minutes
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            <p className="font-semibold text-slate-900">Preview timeline</p>
-            <ol className="mt-2 list-decimal space-y-1 pl-5">
-              <li>0–{diamondPreview} min → Diamond</li>
-              <li>Next {goldPreview} min → Gold</li>
-              <li>Next {silverPreview} min → Silver</li>
-              <li>After {everyoneAfterMinutes} min → Everyone</li>
-            </ol>
-          </div>
-
-          {prioritySettingsMessage ? (
-            <p className="mt-4 text-sm font-medium text-indigo-700">
-              {prioritySettingsMessage}
-            </p>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={() => void savePrioritySettings()}
-            disabled={savingPrioritySettings}
-            className="mt-6 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {savingPrioritySettings ? "Saving..." : "Save Settings"}
-          </button>
-        </div>
-      ) : activeTab === "profile-changes" ? (
-        <>
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-bold text-slate-900">
-              Profile Change Requests
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  ["pending", "Pending"],
-                  ["approved", "Approved"],
-                  ["rejected", "Rejected"],
-                  ["all", "All"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setProfileChangeFilter(value)}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
-                    profileChangeFilter === value
-                      ? "bg-indigo-600 text-white"
-                      : "bg-white text-slate-600 border border-slate-200"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="admin-table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      User
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Changes
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Requested
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredProfileChangeRequests.length === 0 ? (
-                    <tr>
-                      <td
-                        className="px-4 py-10 text-center text-slate-500"
-                        colSpan={4}
-                      >
-                        No profile change requests in this filter.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredProfileChangeRequests.map((req) => {
-                      const name =
-                        `${req.users?.first_name ?? ""} ${req.users?.last_name ?? ""}`.trim() ||
-                        req.users?.phone ||
-                        req.user_id;
-                      const changeCount = Array.isArray(req.requested_changes)
-                        ? req.requested_changes.length
-                        : 0;
-                      return (
-                        <tr
-                          key={req.id}
-                          className="cursor-pointer hover:bg-slate-50"
-                          onClick={() =>
-                            router.push(`/dashboard/profile-changes/${req.id}`)
-                          }
-                        >
-                          <td className="px-4 py-3">
-                            <p className="font-semibold text-slate-900">
-                              {name}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {req.users?.phone || "—"}
-                            </p>
+                    ) : (
+                      (fraudReports ?? []).map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50">
+                          <td className="px-6 py-4 text-slate-700">
+                            {item.from_user?.first_name}
                           </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {changeCount} field
-                            {changeCount === 1 ? "" : "s"}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatDateTime(req.requested_at)}
-                          </td>
-                          <td className="px-4 py-3 capitalize text-slate-700">
-                            {req.status}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : activeTab === "car-verification" ? (
-        <>
-          {vehiclesError ? (
-            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-              Failed to load vehicles: {vehiclesError}
-            </div>
-          ) : null}
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-bold text-slate-900">
-              Car Verification
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  ["pending", "Pending"],
-                  ["approved", "Approved"],
-                  ["rejected", "Rejected"],
-                  ["all", "All"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setVehicleFilter(value)}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
-                    vehicleFilter === value
-                      ? "bg-indigo-600 text-white"
-                      : "bg-white text-slate-600 border border-slate-200"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="admin-table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      User
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Registration Number
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Submitted
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredVehicles.length === 0 ? (
-                    <tr>
-                      <td
-                        className="px-4 py-10 text-center text-slate-500"
-                        colSpan={4}
-                      >
-                        No vehicles in this filter.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredVehicles.map((vehicle) => {
-                      const name =
-                        `${vehicle.users?.first_name ?? ""} ${vehicle.users?.last_name ?? ""}`.trim() ||
-                        vehicle.users?.phone ||
-                        vehicle.user_id;
-                      return (
-                        <tr
-                          key={vehicle.id}
-                          className="cursor-pointer hover:bg-slate-50"
-                          onClick={() =>
-                            router.push(
-                              `/dashboard/car-verification/${vehicle.id}`,
-                            )
-                          }
-                        >
-                          <td className="px-4 py-3">
-                            <p className="font-semibold text-slate-900">
-                              {name}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {vehicle.users?.phone || "—"}
-                            </p>
-                          </td>
-                          <td className="px-4 py-3 font-semibold tracking-wide text-slate-800">
-                            {vehicle.registration_number}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatDateTime(vehicle.created_at)}
-                          </td>
-                          <td className="px-4 py-3 capitalize text-slate-700">
-                            {vehicle.verification_status}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : activeTab === "minimum-fares" ? (
-        <>
-          {routeMinimumFaresError ? (
-            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-              Failed to load minimum fares: {routeMinimumFaresError}
-            </div>
-          ) : null}
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">
-                Set Minimum Fare
-              </h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Directional city+state+vehicle rules. Rajkot → Ahmedabad is
-                separate from Ahmedabad → Rajkot. Legacy rules without a vehicle
-                still apply as fallback.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                resetMinimumFareForm();
-                setShowMinimumFareModal(true);
-              }}
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              Add Rule
-            </button>
-          </div>
-          <div className="mb-4 grid gap-3 sm:grid-cols-3">
-            <input
-              type="search"
-              placeholder="Search city…"
-              value={minFareFilterQ}
-              onChange={(e) => setMinFareFilterQ(e.target.value)}
-              className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
-            />
-            <select
-              value={minFareFilterVehicle}
-              onChange={(e) => setMinFareFilterVehicle(e.target.value)}
-              className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
-            >
-              <option value="">All vehicles</option>
-              <option value="__legacy__">Legacy (no vehicle)</option>
-              {VEHICLE_CATEGORIES.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
-            <select
-              value={minFareFilterStatus}
-              onChange={(e) => setMinFareFilterStatus(e.target.value)}
-              className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
-            >
-              <option value="all">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </div>
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="admin-table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      From City
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      From State
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      To City
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      To State
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Vehicle Category
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Minimum Fare
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Created At
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Updated At
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {(() => {
-                    const filtered = routeMinimumFares.filter((rule) => {
-                      if (
-                        minFareFilterStatus === "active" &&
-                        !rule.is_active
-                      ) {
-                        return false;
-                      }
-                      if (
-                        minFareFilterStatus === "inactive" &&
-                        rule.is_active
-                      ) {
-                        return false;
-                      }
-                      if (minFareFilterVehicle === "__legacy__") {
-                        if (rule.vehicle_category) return false;
-                      } else if (minFareFilterVehicle) {
-                        if (rule.vehicle_category !== minFareFilterVehicle) {
-                          return false;
-                        }
-                      }
-                      if (minFareFilterQ.trim()) {
-                        const q = minFareFilterQ.trim().toLowerCase();
-                        const hay = `${rule.from_city} ${rule.to_city} ${rule.from_state} ${rule.to_state}`.toLowerCase();
-                        if (!hay.includes(q)) return false;
-                      }
-                      return true;
-                    });
-                    if (filtered.length === 0) {
-                      return (
-                        <tr>
-                          <td
-                            className="px-4 py-10 text-center text-slate-500"
-                            colSpan={10}
-                          >
-                            No minimum fare rules match your filters.
-                          </td>
-                        </tr>
-                      );
-                    }
-                    return filtered.map((rule) => (
-                      <tr key={rule.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-semibold text-slate-800">
-                          {rule.from_city}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {rule.from_state}
-                        </td>
-                        <td className="px-4 py-3 font-semibold text-slate-800">
-                          {rule.to_city}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {rule.to_state}
-                        </td>
-                        <td className="px-4 py-3">
-                          {rule.vehicle_category ? (
-                            <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
-                              {rule.vehicle_category}
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
-                              Legacy (all)
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 font-semibold text-slate-900">
-                          ₹{Number(rule.minimum_fare).toLocaleString("en-IN")}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                              rule.is_active
-                                ? "bg-emerald-100 text-emerald-700"
-                                : "bg-slate-200 text-slate-600"
-                            }`}
-                          >
-                            {rule.is_active ? "Active" : "Inactive"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {formatDateTime(rule.created_at)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {formatDateTime(rule.updated_at)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingMinimumFareId(rule.id);
-                                setMinFareFromCity(rule.from_city);
-                                setMinFareFromState(rule.from_state);
-                                setMinFareToCity(rule.to_city);
-                                setMinFareToState(rule.to_state);
-                                setMinFareAmount(String(rule.minimum_fare));
-                                setMinFareVehicle(rule.vehicle_category ?? "");
-                                setMinFareActive(rule.is_active);
-                                setShowMinimumFareModal(true);
-                              }}
-                              className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void toggleMinimumFareActive(
-                                  rule.id,
-                                  !rule.is_active,
-                                )
-                              }
-                              className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200"
-                            >
-                              {rule.is_active ? "Deactivate" : "Activate"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void deleteMinimumFare(rule.id)}
-                              className="rounded-lg bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-200"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : activeTab === "fare-override-requests" ? (
-        <FareOverrideRequestsPanel />
-      ) : activeTab === "active-fare-overrides" ? (
-        <ActiveFareOverridesPanel />
-      ) : activeTab === "admin-users" ? (
-        <AdminUsersPanel />
-      ) : activeTab === "admin-roles" ? (
-        <AdminRolesPanel />
-      ) : activeTab === "audit-logs" ? (
-        <AuditLogsPanel />
-      ) : activeTab === "about-us" ? (
-        <AboutUsAdminPanel />
-      ) : activeTab === "wallet-management" ? (
-        <WalletManagementPanel />
-      ) : activeTab === "membership-management" ? (
-        <MembershipManagementPanel />
-      ) : activeTab === "in-app-popups" ? (
-        <InAppAnnouncementsAdminPanel />
-      ) : activeTab === "winners" ? (
-        <>
-          <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900">
-              Lucky Draw Notification
-            </h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Sends FCM with the existing Sai Ki Gadi notification sound when
-              today&apos;s winner exists. Times are Asia/Kolkata. Booking
-              notifications are unchanged.
-            </p>
 
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <span className="text-sm font-semibold text-slate-700">
-                Enable / Disable
-              </span>
-              <button
-                type="button"
-                onClick={() => setLuckyDrawEnabled((v) => !v)}
-                className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                  luckyDrawEnabled
-                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                    : "bg-slate-200 text-slate-700 hover:bg-slate-300"
-                }`}
-              >
-                {luckyDrawEnabled ? "ON" : "OFF"}
-              </button>
-            </div>
-
-            <div className="mt-4">
-              <p className="mb-2 text-sm font-semibold text-slate-700">
-                Notification times (select 3 or 4)
-              </p>
-              <div className="flex flex-wrap gap-3">
-                {LUCKY_DRAW_SLOT_OPTIONS.map((opt) => {
-                  const checked = luckyDrawSlots.includes(opt.value);
-                  return (
-                    <label
-                      key={opt.value}
-                      className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
-                        checked
-                          ? "border-indigo-300 bg-indigo-50 text-indigo-800"
-                          : "border-slate-200 bg-white text-slate-700"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleLuckyDrawSlot(opt.value)}
-                        className="h-4 w-4 rounded border-slate-300 text-indigo-600"
-                      />
-                      {opt.label}
-                    </label>
-                  );
-                })}
-              </div>
-              <p className="mt-2 text-xs text-slate-500">
-                Selected: {luckyDrawSlots.length} / 4 (must be 3 or 4)
-              </p>
-            </div>
-
-            {luckyDrawSettingsMessage ? (
-              <p className="mt-3 text-sm font-medium text-indigo-700">
-                {luckyDrawSettingsMessage}
-              </p>
-            ) : null}
-            {luckyDrawTestMessage ? (
-              <p className="mt-2 text-sm font-medium text-slate-700">
-                {luckyDrawTestMessage}
-              </p>
-            ) : null}
-
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => void saveLuckyDrawNotificationSettings()}
-                disabled={savingLuckyDrawSettings}
-                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {savingLuckyDrawSettings ? "Saving..." : "Save Settings"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void sendLuckyDrawTestNotification()}
-                disabled={sendingLuckyDrawTest}
-                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {sendingLuckyDrawTest
-                  ? "Sending..."
-                  : "Send test notification now"}
-              </button>
-            </div>
-          </div>
-
-          <div className="mb-4 flex justify-end">
-            <button
-              onClick={() => {
-                setEditingWinnerId(null);
-
-                setSelectedUserId("");
-                setWinnerDate("");
-                setWinnerText("");
-                setWinnerSlot("");
-                setWinnerImage("");
-                setWinnerMediaType("image");
-
-                setShowWinnerModal(true);
-              }}
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              {editingWinnerId ? "Edit Winner" : "Add Winner"}{" "}
-            </button>
-          </div>
-          <div className="admin-table-wrap">
-            <div className="overflow-x-auto">
-              <table className="admin-table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Date
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Winner Text
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-slate-100">
-                  {winnerUser.length === 0 ? (
-                    <tr>
-                      <td
-                        className="px-4 py-10 text-center text-slate-500"
-                        colSpan={3}
-                      >
-                        No winners found.
-                      </td>
-                    </tr>
-                  ) : (
-                    winnerUser.map((winner) => {
-                      const legacyName = [
-                        winner.users?.first_name,
-                        winner.users?.last_name,
-                      ]
-                        .filter(Boolean)
-                        .join(" ")
-                        .trim();
-                      const displayText =
-                        winner.winner_text?.trim() ||
-                        legacyName ||
-                        "(No winner text)";
-
-                      return (
-                        <tr key={winner.id} className="hover:bg-slate-50">
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                            {winner.date}
+                          <td className="px-6 py-4 text-slate-700">
+                            {item.to_user?.first_name}
                           </td>
-                          <td className="min-w-[16rem] px-4 py-3 font-semibold text-slate-800">
-                            <span className="whitespace-pre-wrap">
-                              {displayText}
-                            </span>
+
+                          <td className="px-6 py-4 text-slate-700">
+                            {item.reason}
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
+
+                          <td className="px-6 py-4 text-slate-700">
+                            {item.description || "-"}
+                          </td>
+
+                          <td className="px-6 py-4 text-slate-700">
+                            {new Date(item.created_at).toLocaleDateString()}
+                          </td>
+
+                          <td className="px-6 py-4">
+                            <div className="flex gap-2">
                               <button
-                                type="button"
                                 onClick={() => {
-                                  setEditingWinnerId(winner.id);
-                                  setWinnerDate(winner.date);
-                                  setWinnerText(
-                                    winner.winner_text ?? legacyName,
-                                  );
-                                  setShowWinnerModal(true);
+                                  setEditingFraudId(item.id);
+
+                                  setFromUserId(item.from_user_id);
+                                  setToUserId(item.to_user_id);
+
+                                  setFraudReason(item.reason);
+                                  setFraudDescription(item.description || "");
+
+                                  setShowFraudModal(true);
                                 }}
-                                className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                                className="rounded bg-amber-100 px-3 py-1 text-amber-700"
                               >
                                 Edit
                               </button>
+
                               <button
-                                type="button"
-                                onClick={() => deleteWinner(winner.id)}
-                                className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                                onClick={() => deleteFraud(item.id)}
+                                className="rounded bg-red-100 px-3 py-1 text-red-700"
                               >
                                 Delete
                               </button>
                             </div>
                           </td>
                         </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        </>
-      ) : (
-        <div className="admin-card p-6 text-sm text-slate-600">
-          Unknown admin module. Use the sidebar to open a valid tab.
-        </div>
-      )}
-      {showFraudModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">
-                {editingFraudId ? "Edit Fraud Report" : "Report Fraud"}
-              </h2>
-
-              <button
-                onClick={() => setShowFraudModal(false)}
-                className="text-slate-700"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <select
-                value={fromUserId}
-                onChange={(e) => setFromUserId(e.target.value)}
-                className="h-12 w-full rounded-xl border border-slate-300 px-4 text-slate-900 bg-white"
-              >
-                <option value="">Report By</option>
-
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.first_name} {user.last_name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={toUserId}
-                onChange={(e) => setToUserId(e.target.value)}
-                className="h-12 w-full rounded-xl border border-slate-300 px-4 text-slate-900 bg-white"
-              >
-                <option value="">Fraud User</option>
-
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.first_name} {user.last_name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={fraudReason}
-                onChange={(e) => setFraudReason(e.target.value)}
-                className="h-12 w-full rounded-xl border border-slate-300 px-4 text-slate-900 bg-white"
-              >
-                <option value="">Select Reason</option>
-                <option value="Payment Fraud">Payment Fraud</option>
-                <option value="Fake Booking">Fake Booking</option>
-                <option value="Spam">Spam</option>
-                <option value="Misbehavior">Misbehavior</option>
-              </select>
-
-              <textarea
-                value={fraudDescription}
-                onChange={(e) => setFraudDescription(e.target.value)}
-                placeholder="Description"
-                className="w-full rounded-xl border border-slate-300 p-3 text-slate-900 placeholder:text-slate-400 bg-white"
-                rows={4}
-              />
-
-              <button
-                onClick={createFraud}
-                disabled={savingFraud}
-                className="w-full rounded-xl bg-red-600 py-3 font-semibold text-white"
-              >
-                {savingFraud ? "Saving..." : "Save Report"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showWinnerModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold">{editingWinnerId ? "Edit Winner" : "Add Winner"}</h2>
-              <button type="button" aria-label="Close" onClick={() => setShowWinnerModal(false)}>✕</button>
-            </div>
-            <div className="space-y-5">
-              <label className="block text-sm font-semibold">Date
-                <input type="date" value={winnerDate} onChange={(e) => setWinnerDate(e.target.value)}
-                  className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-3" />
-              </label>
-              <label className="block text-sm font-semibold">Winner Text
-                <textarea rows={8} maxLength={5000} value={winnerText} onChange={(e) => setWinnerText(e.target.value)}
-                  placeholder="Type the winner announcement here. Press Enter for a new line."
-                  className="mt-2 w-full resize-y rounded-lg border border-slate-300 p-3 font-normal whitespace-pre-wrap" />
-              </label>
-              <button type="button" disabled={savingWinner || !winnerDate || !winnerText.trim()}
-                onClick={() => void createWinner()}
-                className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-50">
-                {savingWinner ? "Saving..." : editingWinnerId ? "Update Winner" : "Create Winner"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {showSliderModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">
-                {editingSliderId ? "Edit Slider" : "Add Slider"}
-              </h2>
-
+          </>
+        ) : activeTab === "sliders" ? (
+          <>
+            <div className="mb-4 flex justify-end">
               <button
                 onClick={() => {
-                  setShowSliderModal(false);
-
                   setEditingSliderId(null);
 
                   setSliderImage("");
@@ -5976,399 +5287,1478 @@ export function DashboardTabs({
 
                   setSliderStatus(true);
 
-                  setSliderOrder(0);
+                  setShowSliderModal(true);
                 }}
-                className="text-slate-500 hover:text-slate-700"
+                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
               >
-                ✕
+                Add Slider
               </button>
             </div>
 
-            <div className="space-y-5">
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Media
+                      </th>
+
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Type
+                      </th>
+
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Status
+                      </th>
+
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Display Order
+                      </th>
+
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <DragDropContext onDragEnd={onSliderDragEnd}>
+                    <Droppable droppableId="sliders">
+                      {(provided) => (
+                        <tbody
+                          ref={provided.innerRef}
+                          {...provided.droppableProps}
+                          className="divide-y divide-slate-100"
+                        >
+                          {sliders?.length === 0 ? (
+                            <tr>
+                              <td
+                                className="px-4 py-10 text-center text-slate-500"
+                                colSpan={5}
+                              >
+                                No sliders found.
+                              </td>
+                            </tr>
+                          ) : (
+                            sliderList.map((slider, index) => (
+                              <Draggable
+                                key={slider.id}
+                                draggableId={slider.id}
+                                index={index}
+                              >
+                                {(provided) => (
+                                  <tr
+                                    ref={provided.innerRef}
+                                    {...provided.draggableProps}
+                                    {...provided.dragHandleProps}
+                                    className="hover:bg-slate-50 cursor-grab"
+                                  >
+                                    <td className="px-4 py-3">
+                                      {slider.media_type === "video" ? (
+                                        <video
+                                          src={slider.image}
+                                          className="aspect-[10/5] w-40 rounded-xl object-cover"
+                                          muted
+                                          playsInline
+                                          preload="metadata"
+                                        />
+                                      ) : (
+                                        <img
+                                          src={slider.image}
+                                          alt="slider"
+                                          className="aspect-[10/5] w-40 rounded-xl object-cover"
+                                        />
+                                      )}
+                                    </td>
+
+                                    <td className="px-4 py-3">
+                                      <span
+                                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                          slider.media_type === "video"
+                                            ? "bg-violet-100 text-violet-700"
+                                            : "bg-sky-100 text-sky-700"
+                                        }`}
+                                      >
+                                        {slider.media_type === "video"
+                                          ? "Video"
+                                          : "Image"}
+                                      </span>
+                                    </td>
+
+                                    <td className="px-4 py-3">
+                                      <span
+                                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                          slider.status
+                                            ? "bg-emerald-100 text-emerald-700"
+                                            : "bg-red-100 text-red-700"
+                                        }`}
+                                      >
+                                        {slider.status ? "Active" : "Inactive"}
+                                      </span>
+                                    </td>
+
+                                    <td className="px-4 py-3 font-bold text-slate-700">
+                                      {slider.display_order}
+                                    </td>
+
+                                    <td className="px-4 py-3">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={() => {
+                                            setEditingSliderId(slider.id);
+                                            setSliderImage(slider.image);
+                                            setSliderMediaType(
+                                              slider.media_type === "video"
+                                                ? "video"
+                                                : "image",
+                                            );
+                                            setSliderStatus(slider.status);
+                                            setSliderOrder(
+                                              slider.display_order,
+                                            );
+                                            setShowSliderModal(true);
+                                          }}
+                                          className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                                        >
+                                          Edit
+                                        </button>
+
+                                        <button
+                                          onClick={() =>
+                                            deleteSlider(slider.id)
+                                          }
+                                          className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </Draggable>
+                            ))
+                          )}
+                          {provided.placeholder}
+                        </tbody>
+                      )}
+                    </Droppable>
+                  </DragDropContext>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : activeTab === "priority-settings" ? (
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-bold text-slate-900">
+              Priority Timeline Settings
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Durations control Requirement feed access windows in this order:
+              Diamond → Gold → Silver → Everyone. Changes apply on the next feed
+              load — no app deploy required.
+            </p>
+
+            <div className="mt-6 grid gap-5 sm:grid-cols-3">
               <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Media Type
+                <label className="mb-1 block text-sm font-semibold text-slate-700">
+                  Diamond Priority Duration
                 </label>
-
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSliderMediaType("image");
-                      if (!editingSliderId) {
-                        setSliderImage("");
-                      }
-                    }}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                      sliderMediaType === "image"
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    Image
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSliderMediaType("video");
-                      if (!editingSliderId) {
-                        setSliderImage("");
-                      }
-                    }}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold ${
-                      sliderMediaType === "video"
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    Video
-                  </button>
+                <p className="mb-2 text-xs text-slate-500">
+                  Gold membership purchased and trip_points &gt; 0
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={diamondMinutes}
+                    onChange={(e) => setDiamondMinutes(e.target.value)}
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
+                  />
+                  <span className="text-sm font-medium text-slate-500">
+                    Minutes
+                  </span>
                 </div>
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  {sliderMediaType === "video"
-                    ? "Upload Video"
-                    : "Upload Image"}
+                <label className="mb-1 block text-sm font-semibold text-slate-700">
+                  Gold Priority Duration
                 </label>
-
-                <input
-                  type="file"
-                  accept={
-                    sliderMediaType === "video"
-                      ? "video/mp4,video/quicktime,video/webm"
-                      : "image/*"
-                  }
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-
-                    if (!file) return;
-
-                    try {
-                      setUploadingImage(true);
-
-                      const formData = new FormData();
-
-                      formData.append("file", file);
-                      formData.append("mediaKind", sliderMediaType);
-
-                      const sizeError = validateMediaFileSize(
-                        file,
-                        sliderMediaType,
-                      );
-                      if (sizeError) {
-                        throw new Error(sizeError);
-                      }
-
-                      const response = await fetch("/api/admin/upload", {
-                        method: "POST",
-                        body: formData,
-                      });
-
-                      const data = await readUploadResponse(response);
-
-                      if (!data.ok || !data.url) {
-                        throw new Error(data.error || "Upload failed");
-                      }
-
-                      setSliderImage(data.url);
-                    } catch (error) {
-                      console.error("Slider upload error:", error);
-                      window.alert(formatUploadNetworkError(error));
-                    } finally {
-                      setUploadingImage(false);
-                    }
-                  }}
-                  className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
-                />
-
-                {sliderImage ? (
-                  sliderMediaType === "video" ? (
-                    <video
-                      src={sliderImage}
-                      controls
-                      className="mt-4 aspect-[10/5] w-full rounded-2xl object-cover"
-                    />
-                  ) : (
-                    <img
-                      src={sliderImage}
-                      alt="preview"
-                      className="mt-4 aspect-[10/5] w-full rounded-2xl object-cover"
-                    />
-                  )
-                ) : null}
+                <p className="mb-2 text-xs text-slate-500">
+                  Gold membership purchased (trip_points not required)
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={goldMinutes}
+                    onChange={(e) => setGoldMinutes(e.target.value)}
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
+                  />
+                  <span className="text-sm font-medium text-slate-500">
+                    Minutes
+                  </span>
+                </div>
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Display Order
+                <label className="mb-1 block text-sm font-semibold text-slate-700">
+                  Silver Priority Duration
                 </label>
-
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="Enter display order"
-                  value={sliderOrder}
-                  onChange={(e) => setSliderOrder(Number(e.target.value))}
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                />
+                <p className="mb-2 text-xs text-slate-500">
+                  trip_points &gt; 0 (Gold membership not required)
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={silverMinutes}
+                    onChange={(e) => setSilverMinutes(e.target.value)}
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
+                  />
+                  <span className="text-sm font-medium text-slate-500">
+                    Minutes
+                  </span>
+                </div>
               </div>
-
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={sliderStatus}
-                  onChange={(e) => setSliderStatus(e.target.checked)}
-                />
-
-                <span className="text-sm font-semibold text-slate-700">
-                  Active Status
-                </span>
-              </div>
-
-              <button
-                onClick={createSlider}
-                disabled={savingSlider || uploadingImage || !sliderImage}
-                className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700"
-              >
-                {savingSlider
-                  ? "Saving..."
-                  : editingSliderId
-                    ? "Update Slider"
-                    : "Create Slider"}
-              </button>
             </div>
+
+            <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <p className="font-semibold text-slate-900">Preview timeline</p>
+              <ol className="mt-2 list-decimal space-y-1 pl-5">
+                <li>0–{diamondPreview} min → Diamond</li>
+                <li>Next {goldPreview} min → Gold</li>
+                <li>Next {silverPreview} min → Silver</li>
+                <li>After {everyoneAfterMinutes} min → Everyone</li>
+              </ol>
+            </div>
+
+            {prioritySettingsMessage ? (
+              <p className="mt-4 text-sm font-medium text-indigo-700">
+                {prioritySettingsMessage}
+              </p>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => void savePrioritySettings()}
+              disabled={savingPrioritySettings}
+              className="mt-6 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {savingPrioritySettings ? "Saving..." : "Save Settings"}
+            </button>
           </div>
-        </div>
-      ) : null}
-      {showCityModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">
-                {editingCityId ? "Edit City" : "Add City"}
+        ) : activeTab === "profile-changes" ? (
+          <>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-bold text-slate-900">
+                Profile Change Requests
               </h2>
-
-              <button
-                onClick={() => {
-                  setShowCityModal(false);
-
-                  setEditingCityId(null);
-
-                  setCityName("");
-                  setStateName("");
-                  setDistrictName("");
-                }}
-                className="text-slate-500 hover:text-slate-700"
-              >
-                ✕
-              </button>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["pending", "Pending"],
+                    ["approved", "Approved"],
+                    ["rejected", "Rejected"],
+                    ["all", "All"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setProfileChangeFilter(value)}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                      profileChangeFilter === value
+                        ? "bg-indigo-600 text-white"
+                        : "bg-white text-slate-600 border border-slate-200"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-
-            <div className="space-y-5">
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  City
-                </label>
-
-                <input
-                  type="text"
-                  value={cityName}
-                  onChange={(e) => setCityName(e.target.value)}
-                  placeholder="Enter city"
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                />
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        User
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Changes
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Requested
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredProfileChangeRequests.length === 0 ? (
+                      <tr>
+                        <td
+                          className="px-4 py-10 text-center text-slate-500"
+                          colSpan={4}
+                        >
+                          No profile change requests in this filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredProfileChangeRequests.map((req) => {
+                        const name =
+                          `${req.users?.first_name ?? ""} ${req.users?.last_name ?? ""}`.trim() ||
+                          req.users?.phone ||
+                          req.user_id;
+                        const changeCount = Array.isArray(req.requested_changes)
+                          ? req.requested_changes.length
+                          : 0;
+                        return (
+                          <tr
+                            key={req.id}
+                            className="cursor-pointer hover:bg-slate-50"
+                            onClick={() =>
+                              router.push(
+                                `/dashboard/profile-changes/${req.id}`,
+                              )
+                            }
+                          >
+                            <td className="px-4 py-3">
+                              <p className="font-semibold text-slate-900">
+                                {name}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {req.users?.phone || "—"}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {changeCount} field
+                              {changeCount === 1 ? "" : "s"}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatDateTime(req.requested_at)}
+                            </td>
+                            <td className="px-4 py-3 capitalize text-slate-700">
+                              {req.status}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  State
-                </label>
-
-                <input
-                  type="text"
-                  value={stateName}
-                  onChange={(e) => setStateName(e.target.value)}
-                  placeholder="Enter state"
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  District
-                </label>
-
-                <input
-                  type="text"
-                  value={districtName}
-                  onChange={(e) => setDistrictName(e.target.value)}
-                  placeholder="Enter district"
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <button
-                onClick={createCity}
-                disabled={savingCity || !cityName || !stateName}
-                className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700"
-              >
-                {editingCityId ? "Update City" : "Create City"}
-              </button>
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showMinimumFareModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">
-                {editingMinimumFareId
-                  ? "Edit Minimum Fare"
-                  : "Add Minimum Fare"}
+          </>
+        ) : activeTab === "car-verification" ? (
+          <>
+            {vehiclesError ? (
+              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                Failed to load vehicles: {vehiclesError}
+              </div>
+            ) : null}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-bold text-slate-900">
+                Car Verification
               </h2>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["pending", "Pending"],
+                    ["approved", "Approved"],
+                    ["rejected", "Rejected"],
+                    ["all", "All"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setVehicleFilter(value)}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                      vehicleFilter === value
+                        ? "bg-indigo-600 text-white"
+                        : "bg-white text-slate-600 border border-slate-200"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        User
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Registration Number
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Submitted
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredVehicles.length === 0 ? (
+                      <tr>
+                        <td
+                          className="px-4 py-10 text-center text-slate-500"
+                          colSpan={4}
+                        >
+                          No vehicles in this filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredVehicles.map((vehicle) => {
+                        const name =
+                          `${vehicle.users?.first_name ?? ""} ${vehicle.users?.last_name ?? ""}`.trim() ||
+                          vehicle.users?.phone ||
+                          vehicle.user_id;
+                        return (
+                          <tr
+                            key={vehicle.id}
+                            className="cursor-pointer hover:bg-slate-50"
+                            onClick={() =>
+                              router.push(
+                                `/dashboard/car-verification/${vehicle.id}`,
+                              )
+                            }
+                          >
+                            <td className="px-4 py-3">
+                              <p className="font-semibold text-slate-900">
+                                {name}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {vehicle.users?.phone || "—"}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3 font-semibold tracking-wide text-slate-800">
+                              {vehicle.registration_number}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatDateTime(vehicle.created_at)}
+                            </td>
+                            <td className="px-4 py-3 capitalize text-slate-700">
+                              {vehicle.verification_status}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : activeTab === "minimum-fares" ? (
+          <>
+            {routeMinimumFaresError ? (
+              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                Failed to load minimum fares: {routeMinimumFaresError}
+              </div>
+            ) : null}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">
+                  Set Minimum Fare
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Directional city+state+vehicle rules. Rajkot → Ahmedabad is
+                  separate from Ahmedabad → Rajkot. Legacy rules without a
+                  vehicle still apply as fallback.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => {
-                  setShowMinimumFareModal(false);
                   resetMinimumFareForm();
+                  setShowMinimumFareModal(true);
                 }}
-                className="text-slate-500 hover:text-slate-700"
+                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
               >
-                ✕
+                Add Rule
               </button>
             </div>
-            <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700">
-                    From City
-                  </label>
-                  <input
-                    type="text"
-                    value={minFareFromCity}
-                    onChange={(e) => setMinFareFromCity(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700">
-                    From State
-                  </label>
-                  <input
-                    type="text"
-                    value={minFareFromState}
-                    onChange={(e) => setMinFareFromState(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700">
-                    To City
-                  </label>
-                  <input
-                    type="text"
-                    value={minFareToCity}
-                    onChange={(e) => setMinFareToCity(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-semibold text-slate-700">
-                    To State
-                  </label>
-                  <input
-                    type="text"
-                    value={minFareToState}
-                    onChange={(e) => setMinFareToState(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
-                  />
-                </div>
+            <div className="mb-4 grid gap-3 sm:grid-cols-3">
+              <input
+                type="search"
+                placeholder="Search city…"
+                value={minFareFilterQ}
+                onChange={(e) => setMinFareFilterQ(e.target.value)}
+                className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
+              />
+              <select
+                value={minFareFilterVehicle}
+                onChange={(e) => setMinFareFilterVehicle(e.target.value)}
+                className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
+              >
+                <option value="">All vehicles</option>
+                <option value="__legacy__">Legacy (no vehicle)</option>
+                {VEHICLE_CATEGORIES.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={minFareFilterStatus}
+                onChange={(e) => setMinFareFilterStatus(e.target.value)}
+                className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
+              >
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        From City
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        From State
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        To City
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        To State
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Vehicle Category
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Minimum Fare
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Status
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Created At
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Updated At
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(() => {
+                      const filtered = routeMinimumFares.filter((rule) => {
+                        if (
+                          minFareFilterStatus === "active" &&
+                          !rule.is_active
+                        ) {
+                          return false;
+                        }
+                        if (
+                          minFareFilterStatus === "inactive" &&
+                          rule.is_active
+                        ) {
+                          return false;
+                        }
+                        if (minFareFilterVehicle === "__legacy__") {
+                          if (rule.vehicle_category) return false;
+                        } else if (minFareFilterVehicle) {
+                          if (rule.vehicle_category !== minFareFilterVehicle) {
+                            return false;
+                          }
+                        }
+                        if (minFareFilterQ.trim()) {
+                          const q = minFareFilterQ.trim().toLowerCase();
+                          const hay =
+                            `${rule.from_city} ${rule.to_city} ${rule.from_state} ${rule.to_state}`.toLowerCase();
+                          if (!hay.includes(q)) return false;
+                        }
+                        return true;
+                      });
+                      if (filtered.length === 0) {
+                        return (
+                          <tr>
+                            <td
+                              className="px-4 py-10 text-center text-slate-500"
+                              colSpan={10}
+                            >
+                              No minimum fare rules match your filters.
+                            </td>
+                          </tr>
+                        );
+                      }
+                      return filtered.map((rule) => (
+                        <tr key={rule.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-semibold text-slate-800">
+                            {rule.from_city}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {rule.from_state}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">
+                            {rule.to_city}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {rule.to_state}
+                          </td>
+                          <td className="px-4 py-3">
+                            {rule.vehicle_category ? (
+                              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                                {rule.vehicle_category}
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+                                Legacy (all)
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            ₹{Number(rule.minimum_fare).toLocaleString("en-IN")}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                rule.is_active
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-slate-200 text-slate-600"
+                              }`}
+                            >
+                              {rule.is_active ? "Active" : "Inactive"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {formatDateTime(rule.created_at)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {formatDateTime(rule.updated_at)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMinimumFareId(rule.id);
+                                  setMinFareFromCity(rule.from_city);
+                                  setMinFareFromState(rule.from_state);
+                                  setMinFareToCity(rule.to_city);
+                                  setMinFareToState(rule.to_state);
+                                  setMinFareAmount(String(rule.minimum_fare));
+                                  setMinFareVehicle(
+                                    rule.vehicle_category ?? "",
+                                  );
+                                  setMinFareActive(rule.is_active);
+                                  setShowMinimumFareModal(true);
+                                }}
+                                className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void toggleMinimumFareActive(
+                                    rule.id,
+                                    !rule.is_active,
+                                  )
+                                }
+                                className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200"
+                              >
+                                {rule.is_active ? "Deactivate" : "Activate"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void deleteMinimumFare(rule.id)}
+                                className="rounded-lg bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-200"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
               </div>
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  Vehicle Category
-                </label>
-                <select
-                  value={minFareVehicle}
-                  onChange={(e) => setMinFareVehicle(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
+            </div>
+          </>
+        ) : activeTab === "fare-override-requests" ? (
+          <FareOverrideRequestsPanel />
+        ) : activeTab === "active-fare-overrides" ? (
+          <ActiveFareOverridesPanel />
+        ) : activeTab === "admin-users" ? (
+          <AdminUsersPanel />
+        ) : activeTab === "admin-roles" ? (
+          <AdminRolesPanel />
+        ) : activeTab === "audit-logs" ? (
+          <AuditLogsPanel />
+        ) : activeTab === "about-us" ? (
+          <AboutUsAdminPanel />
+        ) : activeTab === "wallet-management" ? (
+          <WalletManagementPanel />
+        ) : activeTab === "membership-management" ? (
+          <MembershipManagementPanel />
+        ) : activeTab === "in-app-popups" ? (
+          <InAppAnnouncementsAdminPanel />
+        ) : activeTab === "winners" ? (
+          <>
+            <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-900">
+                Lucky Draw Notification
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Sends FCM with the existing Sai Ki Gadi notification sound when
+                today&apos;s winner exists. Times are Asia/Kolkata. Booking
+                notifications are unchanged.
+              </p>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <span className="text-sm font-semibold text-slate-700">
+                  Enable / Disable
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setLuckyDrawEnabled((v) => !v)}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                    luckyDrawEnabled
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                      : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                  }`}
                 >
-                  <option value="">Select vehicle…</option>
-                  {VEHICLE_CATEGORIES.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
+                  {luckyDrawEnabled ? "ON" : "OFF"}
+                </button>
+              </div>
+
+              <div className="mt-4">
+                <p className="mb-2 text-sm font-semibold text-slate-700">
+                  Notification times (select 3 or 4)
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  {LUCKY_DRAW_SLOT_OPTIONS.map((opt) => {
+                    const checked = luckyDrawSlots.includes(opt.value);
+                    return (
+                      <label
+                        key={opt.value}
+                        className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
+                          checked
+                            ? "border-indigo-300 bg-indigo-50 text-indigo-800"
+                            : "border-slate-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleLuckyDrawSlot(opt.value)}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                        />
+                        {opt.label}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Selected: {luckyDrawSlots.length} / 4 (must be 3 or 4)
+                </p>
+              </div>
+
+              {luckyDrawSettingsMessage ? (
+                <p className="mt-3 text-sm font-medium text-indigo-700">
+                  {luckyDrawSettingsMessage}
+                </p>
+              ) : null}
+              {luckyDrawTestMessage ? (
+                <p className="mt-2 text-sm font-medium text-slate-700">
+                  {luckyDrawTestMessage}
+                </p>
+              ) : null}
+
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => void saveLuckyDrawNotificationSettings()}
+                  disabled={savingLuckyDrawSettings}
+                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {savingLuckyDrawSettings ? "Saving..." : "Save Settings"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void sendLuckyDrawTestNotification()}
+                  disabled={sendingLuckyDrawTest}
+                  className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {sendingLuckyDrawTest
+                    ? "Sending..."
+                    : "Send test notification now"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-4 flex justify-end">
+              <button
+                onClick={() => {
+                  setEditingWinnerId(null);
+
+                  setSelectedUserId("");
+                  setWinnerDate("");
+                  setWinnerText("");
+                  setWinnerSlot("");
+                  setWinnerImage("");
+                  setWinnerMediaType("image");
+
+                  setShowWinnerModal(true);
+                }}
+                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+              >
+                {editingWinnerId ? "Edit Winner" : "Add Winner"}{" "}
+              </button>
+            </div>
+            <div className="admin-table-wrap">
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Date
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Winner Text
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100">
+                    {winnerUser.length === 0 ? (
+                      <tr>
+                        <td
+                          className="px-4 py-10 text-center text-slate-500"
+                          colSpan={3}
+                        >
+                          No winners found.
+                        </td>
+                      </tr>
+                    ) : (
+                      winnerUser.map((winner) => {
+                        const legacyName = [
+                          winner.users?.first_name,
+                          winner.users?.last_name,
+                        ]
+                          .filter(Boolean)
+                          .join(" ")
+                          .trim();
+                        const displayText =
+                          winner.winner_text?.trim() ||
+                          legacyName ||
+                          "(No winner text)";
+
+                        return (
+                          <tr key={winner.id} className="hover:bg-slate-50">
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                              {winner.date}
+                            </td>
+                            <td className="min-w-[16rem] px-4 py-3 font-semibold text-slate-800">
+                              <span className="whitespace-pre-wrap">
+                                {displayText}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingWinnerId(winner.id);
+                                    setWinnerDate(winner.date);
+                                    setWinnerText(
+                                      winner.winner_text ?? legacyName,
+                                    );
+                                    setShowWinnerModal(true);
+                                  }}
+                                  className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteWinner(winner.id)}
+                                  className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="admin-card p-6 text-sm text-slate-600">
+            Unknown admin module. Use the sidebar to open a valid tab.
+          </div>
+        )}
+        {showFraudModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-slate-900">
+                  {editingFraudId ? "Edit Fraud Report" : "Report Fraud"}
+                </h2>
+
+                <button
+                  onClick={() => setShowFraudModal(false)}
+                  className="text-slate-700"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <select
+                  value={fromUserId}
+                  onChange={(e) => setFromUserId(e.target.value)}
+                  className="h-12 w-full rounded-xl border border-slate-300 px-4 text-slate-900 bg-white"
+                >
+                  <option value="">Report By</option>
+
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.first_name} {user.last_name}
                     </option>
                   ))}
                 </select>
-                {editingMinimumFareId && !minFareVehicle ? (
-                  <p className="mt-1 text-xs text-amber-700">
-                    This is a legacy rule (no vehicle). Choose a vehicle to
-                    convert it, or leave blank to keep as route-level fallback.
-                  </p>
-                ) : null}
+
+                <select
+                  value={toUserId}
+                  onChange={(e) => setToUserId(e.target.value)}
+                  className="h-12 w-full rounded-xl border border-slate-300 px-4 text-slate-900 bg-white"
+                >
+                  <option value="">Fraud User</option>
+
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.first_name} {user.last_name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={fraudReason}
+                  onChange={(e) => setFraudReason(e.target.value)}
+                  className="h-12 w-full rounded-xl border border-slate-300 px-4 text-slate-900 bg-white"
+                >
+                  <option value="">Select Reason</option>
+                  <option value="Payment Fraud">Payment Fraud</option>
+                  <option value="Fake Booking">Fake Booking</option>
+                  <option value="Spam">Spam</option>
+                  <option value="Misbehavior">Misbehavior</option>
+                </select>
+
+                <textarea
+                  value={fraudDescription}
+                  onChange={(e) => setFraudDescription(e.target.value)}
+                  placeholder="Description"
+                  className="w-full rounded-xl border border-slate-300 p-3 text-slate-900 placeholder:text-slate-400 bg-white"
+                  rows={4}
+                />
+
+                <button
+                  onClick={createFraud}
+                  disabled={savingFraud}
+                  className="w-full rounded-xl bg-red-600 py-3 font-semibold text-white"
+                >
+                  {savingFraud ? "Saving..." : "Save Report"}
+                </button>
               </div>
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">
-                  Minimum Fare (₹)
+            </div>
+          </div>
+        )}
+        {showWinnerModal ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-xl font-bold">
+                  {editingWinnerId ? "Edit Winner" : "Add Winner"}
+                </h2>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  onClick={() => setShowWinnerModal(false)}
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="space-y-5">
+                <label className="block text-sm font-semibold">
+                  Date
+                  <input
+                    type="date"
+                    value={winnerDate}
+                    onChange={(e) => setWinnerDate(e.target.value)}
+                    className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-3"
+                  />
                 </label>
-                <input
-                  type="number"
-                  min={1}
-                  step="1"
-                  value={minFareAmount}
-                  onChange={(e) => setMinFareAmount(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
-                />
+                <label className="block text-sm font-semibold">
+                  Winner Text
+                  <textarea
+                    rows={8}
+                    maxLength={5000}
+                    value={winnerText}
+                    onChange={(e) => setWinnerText(e.target.value)}
+                    placeholder="Type the winner announcement here. Press Enter for a new line."
+                    className="mt-2 w-full resize-y rounded-lg border border-slate-300 p-3 font-normal whitespace-pre-wrap"
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={savingWinner || !winnerDate || !winnerText.trim()}
+                  onClick={() => void createWinner()}
+                  className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-50"
+                >
+                  {savingWinner
+                    ? "Saving..."
+                    : editingWinnerId
+                      ? "Update Winner"
+                      : "Create Winner"}
+                </button>
               </div>
-              <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={minFareActive}
-                  onChange={(e) => setMinFareActive(e.target.checked)}
-                />
-                Active
-              </label>
-              <div className="flex gap-3">
+            </div>
+          </div>
+        ) : null}
+        {showSliderModal ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-slate-900">
+                  {editingSliderId ? "Edit Slider" : "Add Slider"}
+                </h2>
+
+                <button
+                  onClick={() => {
+                    setShowSliderModal(false);
+
+                    setEditingSliderId(null);
+
+                    setSliderImage("");
+
+                    setSliderMediaType("image");
+
+                    setSliderStatus(true);
+
+                    setSliderOrder(0);
+                  }}
+                  className="text-slate-500 hover:text-slate-700"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-5">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    Media Type
+                  </label>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSliderMediaType("image");
+                        if (!editingSliderId) {
+                          setSliderImage("");
+                        }
+                      }}
+                      className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                        sliderMediaType === "image"
+                          ? "bg-indigo-600 text-white"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      Image
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSliderMediaType("video");
+                        if (!editingSliderId) {
+                          setSliderImage("");
+                        }
+                      }}
+                      className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                        sliderMediaType === "video"
+                          ? "bg-indigo-600 text-white"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      Video
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    {sliderMediaType === "video"
+                      ? "Upload Video"
+                      : "Upload Image"}
+                  </label>
+
+                  <input
+                    type="file"
+                    accept={
+                      sliderMediaType === "video"
+                        ? "video/mp4,video/quicktime,video/webm"
+                        : "image/*"
+                    }
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+
+                      if (!file) return;
+
+                      try {
+                        setUploadingImage(true);
+
+                        const formData = new FormData();
+
+                        formData.append("file", file);
+                        formData.append("mediaKind", sliderMediaType);
+
+                        const sizeError = validateMediaFileSize(
+                          file,
+                          sliderMediaType,
+                        );
+                        if (sizeError) {
+                          throw new Error(sizeError);
+                        }
+
+                        const response = await fetch("/api/admin/upload", {
+                          method: "POST",
+                          body: formData,
+                        });
+
+                        const data = await readUploadResponse(response);
+
+                        if (!data.ok || !data.url) {
+                          throw new Error(data.error || "Upload failed");
+                        }
+
+                        setSliderImage(data.url);
+                      } catch (error) {
+                        console.error("Slider upload error:", error);
+                        window.alert(formatUploadNetworkError(error));
+                      } finally {
+                        setUploadingImage(false);
+                      }
+                    }}
+                    className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900"
+                  />
+
+                  {sliderImage ? (
+                    sliderMediaType === "video" ? (
+                      <video
+                        src={sliderImage}
+                        controls
+                        className="mt-4 aspect-[10/5] w-full rounded-2xl object-cover"
+                      />
+                    ) : (
+                      <img
+                        src={sliderImage}
+                        alt="preview"
+                        className="mt-4 aspect-[10/5] w-full rounded-2xl object-cover"
+                      />
+                    )
+                  ) : null}
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    Display Order
+                  </label>
+
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Enter display order"
+                    value={sliderOrder}
+                    onChange={(e) => setSliderOrder(Number(e.target.value))}
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={sliderStatus}
+                    onChange={(e) => setSliderStatus(e.target.checked)}
+                  />
+
+                  <span className="text-sm font-semibold text-slate-700">
+                    Active Status
+                  </span>
+                </div>
+
+                <button
+                  onClick={createSlider}
+                  disabled={savingSlider || uploadingImage || !sliderImage}
+                  className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700"
+                >
+                  {savingSlider
+                    ? "Saving..."
+                    : editingSliderId
+                      ? "Update Slider"
+                      : "Create Slider"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {showCityModal ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-slate-900">
+                  {editingCityId ? "Edit City" : "Add City"}
+                </h2>
+
+                <button
+                  onClick={() => {
+                    setShowCityModal(false);
+
+                    setEditingCityId(null);
+
+                    setCityName("");
+                    setStateName("");
+                    setDistrictName("");
+                  }}
+                  className="text-slate-500 hover:text-slate-700"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-5">
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-700">
+                    City
+                  </label>
+
+                  <input
+                    type="text"
+                    value={cityName}
+                    onChange={(e) => setCityName(e.target.value)}
+                    placeholder="Enter city"
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-700">
+                    State
+                  </label>
+
+                  <input
+                    type="text"
+                    value={stateName}
+                    onChange={(e) => setStateName(e.target.value)}
+                    placeholder="Enter state"
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-700">
+                    District
+                  </label>
+
+                  <input
+                    type="text"
+                    value={districtName}
+                    onChange={(e) => setDistrictName(e.target.value)}
+                    placeholder="Enter district"
+                    className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <button
+                  onClick={createCity}
+                  disabled={savingCity || !cityName || !stateName}
+                  className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700"
+                >
+                  {editingCityId ? "Update City" : "Create City"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {showMinimumFareModal ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-slate-900">
+                  {editingMinimumFareId
+                    ? "Edit Minimum Fare"
+                    : "Add Minimum Fare"}
+                </h2>
                 <button
                   type="button"
                   onClick={() => {
                     setShowMinimumFareModal(false);
                     resetMinimumFareForm();
                   }}
-                  className="flex-1 rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700"
+                  className="text-slate-500 hover:text-slate-700"
                 >
-                  Cancel
+                  ✕
                 </button>
-                <button
-                  type="button"
-                  disabled={
-                    savingMinimumFare ||
-                    !minFareFromCity.trim() ||
-                    !minFareFromState.trim() ||
-                    !minFareToCity.trim() ||
-                    !minFareToState.trim() ||
-                    !minFareAmount.trim() ||
-                    (!editingMinimumFareId && !minFareVehicle.trim())
-                  }
-                  onClick={() => void saveMinimumFare()}
-                  className="flex-1 rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-                >
-                  {savingMinimumFare
-                    ? "Saving…"
-                    : editingMinimumFareId
-                      ? "Save Rule"
-                      : "Save Rule"}
-                </button>
+              </div>
+              <div className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      From City
+                    </label>
+                    <input
+                      type="text"
+                      value={minFareFromCity}
+                      onChange={(e) => setMinFareFromCity(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      From State
+                    </label>
+                    <input
+                      type="text"
+                      value={minFareFromState}
+                      onChange={(e) => setMinFareFromState(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      To City
+                    </label>
+                    <input
+                      type="text"
+                      value={minFareToCity}
+                      onChange={(e) => setMinFareToCity(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      To State
+                    </label>
+                    <input
+                      type="text"
+                      value={minFareToState}
+                      onChange={(e) => setMinFareToState(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-700">
+                    Vehicle Category
+                  </label>
+                  <select
+                    value={minFareVehicle}
+                    onChange={(e) => setMinFareVehicle(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
+                  >
+                    <option value="">Select vehicle…</option>
+                    {VEHICLE_CATEGORIES.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                  {editingMinimumFareId && !minFareVehicle ? (
+                    <p className="mt-1 text-xs text-amber-700">
+                      This is a legacy rule (no vehicle). Choose a vehicle to
+                      convert it, or leave blank to keep as route-level
+                      fallback.
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-700">
+                    Minimum Fare (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    step="1"
+                    value={minFareAmount}
+                    onChange={(e) => setMinFareAmount(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={minFareActive}
+                    onChange={(e) => setMinFareActive(e.target.checked)}
+                  />
+                  Active
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMinimumFareModal(false);
+                      resetMinimumFareForm();
+                    }}
+                    className="flex-1 rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      savingMinimumFare ||
+                      !minFareFromCity.trim() ||
+                      !minFareFromState.trim() ||
+                      !minFareToCity.trim() ||
+                      !minFareToState.trim() ||
+                      !minFareAmount.trim() ||
+                      (!editingMinimumFareId && !minFareVehicle.trim())
+                    }
+                    onClick={() => void saveMinimumFare()}
+                    className="flex-1 rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {savingMinimumFare
+                      ? "Saving…"
+                      : editingMinimumFareId
+                        ? "Save Rule"
+                        : "Save Rule"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
       </div>
     </section>
   );

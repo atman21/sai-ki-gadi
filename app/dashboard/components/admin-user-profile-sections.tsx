@@ -22,6 +22,10 @@ export const ADMIN_USER_DETAIL_SELECT = [
   "membership_duration_days",
   "verified",
   "verification_status",
+  "verification_rejection_reason",
+  "verification_submitted_at",
+  "verification_reviewed_by",
+  "verification_reviewed_at",
   "status",
   "created_at",
   "updated_at",
@@ -74,6 +78,10 @@ export type AdminUserDetail = {
   membership_duration_days: number | null;
   verified: boolean | null;
   verification_status: string | null;
+  verification_rejection_reason: string | null;
+  verification_submitted_at: string | null;
+  verification_reviewed_by: string | null;
+  verification_reviewed_at: string | null;
   status: boolean | null;
   created_at: string | null;
   updated_at: string | null;
@@ -139,7 +147,11 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() && !Number.isNaN(Number(value))) {
+  if (
+    typeof value === "string" &&
+    value.trim() &&
+    !Number.isNaN(Number(value))
+  ) {
     return Number(value);
   }
   return null;
@@ -181,6 +193,10 @@ export function normalizeAdminUserDetail(
     membership_duration_days: asNumber(row.membership_duration_days),
     verified: asBoolean(row.verified),
     verification_status: asString(row.verification_status),
+    verification_rejection_reason: asString(row.verification_rejection_reason),
+    verification_submitted_at: asString(row.verification_submitted_at),
+    verification_reviewed_by: asString(row.verification_reviewed_by),
+    verification_reviewed_at: asString(row.verification_reviewed_at),
     status: asBoolean(row.status),
     created_at: asString(row.created_at),
     updated_at: asString(row.updated_at),
@@ -445,10 +461,7 @@ export function AdminUserProfileSections({
           label="Preferred City"
           value={displayValue(user.preferred_city)}
         />
-        <ProfileField
-          label="Language"
-          value={formatLanguage(user.language)}
-        />
+        <ProfileField label="Language" value={formatLanguage(user.language)} />
       </Section>
 
       <Section title="Roles">
@@ -520,18 +533,14 @@ export function AdminUserProfileSections({
         />
         <ProfileField
           label="Trip Points"
-          value={
-            user.trip_points != null ? String(user.trip_points) : EMPTY
-          }
+          value={user.trip_points != null ? String(user.trip_points) : EMPTY}
         />
         <ProfileField
           label="Average Rating"
           value={
             user.rating_average != null
               ? `${Number(user.rating_average).toFixed(2)}${
-                  user.rating_count != null
-                    ? ` (${user.rating_count})`
-                    : ""
+                  user.rating_count != null ? ` (${user.rating_count})` : ""
                 }`
               : EMPTY
           }
@@ -553,6 +562,22 @@ export function AdminUserProfileSections({
         <ProfileField
           label="Verification Status"
           value={formatVerificationStatus(user.verification_status)}
+        />
+        <ProfileField
+          label="Rejection Reason"
+          value={user.verification_rejection_reason?.trim() || EMPTY}
+        />
+        <ProfileField
+          label="Documents Submitted At"
+          value={formatDateTimeOrEmpty(user.verification_submitted_at)}
+        />
+        <ProfileField
+          label="Last Reviewed By"
+          value={user.verification_reviewed_by?.trim() || EMPTY}
+        />
+        <ProfileField
+          label="Last Reviewed At"
+          value={formatDateTimeOrEmpty(user.verification_reviewed_at)}
         />
         <ProfileField
           label="Account Status"

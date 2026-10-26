@@ -1,9 +1,19 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
-import { supabaseAdmin, usingServiceRole, serviceRoleConfigIssue, supabaseProjectHost } from "@/lib/supabase-admin";
+import {
+    serviceRoleConfigIssue,
+    supabaseAdmin,
+    supabaseProjectHost,
+    usingServiceRole,
+} from "@/lib/supabase-admin";
 
-import { DashboardTabs, type ProfileChangeRequestRow, type VehicleVerificationRow, type RouteMinimumFareRow } from "./dashboard-tabs";
+import {
+    DashboardTabs,
+    type ProfileChangeRequestRow,
+    type RouteMinimumFareRow,
+    type VehicleVerificationRow,
+} from "./dashboard-tabs";
 
 export const metadata: Metadata = {
   title: "Dashboard | Sai ki Gadi Admin",
@@ -53,7 +63,10 @@ type UserIdRow = { user_id: string };
 
 type TripAssignmentRow = { user_id: string; assigned_id: string | null };
 
-async function fetchAllTripAssignments(table: "requirements" | "exchange_listings", assignedColumn: "assigned_to_user_id" | "exchanged_to_user_id"): Promise<TripAssignmentRow[]> {
+async function fetchAllTripAssignments(
+  table: "requirements" | "exchange_listings",
+  assignedColumn: "assigned_to_user_id" | "exchanged_to_user_id",
+): Promise<TripAssignmentRow[]> {
   const pageSize = 1000;
   const result: TripAssignmentRow[] = [];
   // Cap pages so a runaway loop cannot hang dashboard bootstrap; 1000*500 = 500k rows.
@@ -93,16 +106,22 @@ async function fetchAllTripAssignments(table: "requirements" | "exchange_listing
   return result;
 }
 
-function countAssignments(rows: TripAssignmentRow[], field: "user_id" | "assigned_id"): Map<string, number> {
+function countAssignments(
+  rows: TripAssignmentRow[],
+  field: "user_id" | "assigned_id",
+): Map<string, number> {
   const map = new Map<string, number>();
   for (const row of rows) {
-    const id = row[field]; if (!id) continue;
+    const id = row[field];
+    if (!id) continue;
     map.set(id, (map.get(id) ?? 0) + 1);
   }
   return map;
 }
 
-function countByUserId(rows: UserIdRow[] | null | undefined): Map<string, number> {
+function countByUserId(
+  rows: UserIdRow[] | null | undefined,
+): Map<string, number> {
   const counts = new Map<string, number>();
   for (const row of rows ?? []) {
     if (!row.user_id) continue;
@@ -591,9 +610,7 @@ export default async function DashboardPage() {
 
   // Pre-migration fallback: column vehicle_category may not exist yet.
   if (
-    routeMinimumFaresError?.message
-      ?.toLowerCase()
-      .includes("vehicle_category")
+    routeMinimumFaresError?.message?.toLowerCase().includes("vehicle_category")
   ) {
     const retry = await supabaseAdmin
       .from("route_minimum_fares")
@@ -739,37 +756,37 @@ export default async function DashboardPage() {
             <div className="h-64 animate-pulse rounded-2xl border border-slate-200 bg-white" />
           }
         >
-        <DashboardTabs
-          totalUsers={allUsers.length}
-          membership={membership}
-          verifiedCount={verifiedCount}
-          unverifiedCount={unverifiedCount}
-          pendingVerificationUsers={pendingVerificationUsers}
-          rejectedPartialUsers={rejectedPartialUsers}
-          notStartedVerificationUsers={notStartedVerificationUsers}
-          showRlsHint={!usingServiceRole}
-          serviceRoleIssue={serviceRoleConfigIssue()}
-          supabaseHost={supabaseProjectHost()}
-          profileChangeRequestsError={
-            profileChangeRequestsError?.message ?? null
-          }
-          vehiclesError={vehiclesError?.message ?? null}
-          routeMinimumFaresError={routeMinimumFaresError?.message ?? null}
-          winnerUser={winners ?? []}
-          cities={cities ?? []}
-          sliders={sliders ?? []}
-          users={allUsers ?? []}
-          requirements={requirements ?? []}
-          exchanges={exchanges ?? []}
-          fraudReports={fraudReports ?? []}
-          prioritySettings={prioritySettings}
-          luckyDrawNotificationSettings={luckyDrawNotificationSettings}
-          birthdayNotificationSettings={birthdayNotificationSettings}
-          profileChangeRequests={profileChangeRequests}
-          vehicles={vehicles}
-          routeMinimumFares={routeMinimumFares}
-          fareStats={fareStats}
-        />
+          <DashboardTabs
+            totalUsers={allUsers.length}
+            membership={membership}
+            verifiedCount={verifiedCount}
+            unverifiedCount={unverifiedCount}
+            pendingVerificationUsers={pendingVerificationUsers}
+            rejectedPartialUsers={rejectedPartialUsers}
+            notStartedVerificationUsers={notStartedVerificationUsers}
+            showRlsHint={!usingServiceRole}
+            serviceRoleIssue={serviceRoleConfigIssue()}
+            supabaseHost={supabaseProjectHost()}
+            profileChangeRequestsError={
+              profileChangeRequestsError?.message ?? null
+            }
+            vehiclesError={vehiclesError?.message ?? null}
+            routeMinimumFaresError={routeMinimumFaresError?.message ?? null}
+            winnerUser={winners ?? []}
+            cities={cities ?? []}
+            sliders={sliders ?? []}
+            users={allUsers ?? []}
+            requirements={requirements ?? []}
+            exchanges={exchanges ?? []}
+            fraudReports={fraudReports ?? []}
+            prioritySettings={prioritySettings}
+            luckyDrawNotificationSettings={luckyDrawNotificationSettings}
+            birthdayNotificationSettings={birthdayNotificationSettings}
+            profileChangeRequests={profileChangeRequests}
+            vehicles={vehicles}
+            routeMinimumFares={routeMinimumFares}
+            fareStats={fareStats}
+          />
         </Suspense>
       </main>
     </div>

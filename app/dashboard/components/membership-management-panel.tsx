@@ -2,9 +2,13 @@
 
 import { FormEvent, useMemo, useState } from "react";
 
+import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
 import { PageHeader } from "@/components/admin/ui/page-header";
 import { formatDateTime } from "@/lib/format-datetime";
-import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
+import {
+  getManualGoldDowngradeBlockReason,
+  getMembershipLifecycleStatus,
+} from "@/lib/admin-membership-status";
 
 type SearchUser = {
   id: string;
@@ -34,6 +38,12 @@ type HistoryRow = {
 };
 
 export function MembershipManagementPanel() {
+  const adminAccess = useAdminAccessOptional();
+  const canConvertToGold =
+    adminAccess?.can("members.convert_regular_to_gold") ?? false;
+  const canManageMembership =
+    adminAccess?.can("members.membership") ?? false;
+
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,6 +63,32 @@ export function MembershipManagementPanel() {
     () => (selected ? getMembershipLifecycleStatus(selected) : null),
     [selected],
   );
+
+  const selectedIsActiveGold = useMemo(() => {
+    if (!selected) return false;
+    return (
+      selected.membership_type === "gold" &&
+      getMembershipLifecycleStatus(selected) === "Active"
+    );
+  }, [selected]);
+
+  const manualDowngradeBlock = useMemo(
+    () => (selected ? getManualGoldDowngradeBlockReason(selected) : null),
+    [selected],
+  );
+  const regularOptionAllowed = !manualDowngradeBlock;
+
+  /** Choosing Gold for a non-active-Gold user is a conversion. */
+  const goldOptionAllowed =
+    selected?.membership_type === "gold" ||
+    selectedIsActiveGold ||
+    canConvertToGold;
+  const canSubmitPlan =
+    plan === "gold"
+      ? selectedIsActiveGold
+        ? canManageMembership
+        : canConvertToGold
+      : canManageMembership && regularOptionAllowed;
 
   async function searchUsers() {
     const q = query.trim();
@@ -122,7 +158,8 @@ export function MembershipManagementPanel() {
     const isActiveGold =
       user.membership_type === "gold" &&
       getMembershipLifecycleStatus(user) === "Active";
-    setPlan(isActiveGold ? "gold" : "regular");
+    const cannotDowngrade = !!getManualGoldDowngradeBlockReason(user);
+    setPlan(isActiveGold || cannotDowngrade ? "gold" : "regular");
     setDurationDays(
       user.membership_duration_days && user.membership_duration_days > 0
         ? String(user.membership_duration_days)
@@ -142,6 +179,25 @@ export function MembershipManagementPanel() {
     setSuccess(null);
 
     try {
+      const isActiveGold =
+        selected.membership_type === "gold" &&
+        getMembershipLifecycleStatus(selected) === "Active";
+      if (plan === "regular") {
+        const block = getManualGoldDowngradeBlockReason(selected);
+        if (block) throw new Error(block);
+      }
+      if (plan === "gold" && !isActiveGold && !canConvertToGold) {
+        throw new Error(
+          "You do not have permission to convert Regular membership to Gold.",
+        );
+      }
+      if (
+        (plan === "regular" || (plan === "gold" && isActiveGold)) &&
+        !canManageMembership
+      ) {
+        throw new Error("You do not have permission to manage memberships.");
+      }
+
       const days = plan === "gold" ? Number(durationDays) : undefined;
       if (
         plan === "gold" &&
@@ -397,17 +453,43 @@ export function MembershipManagementPanel() {
               <label className="block text-sm font-semibold text-slate-700">
                 Membership plan
                 <select
-                  value={plan}
+                  value={
+                    !regularOptionAllowed && plan === "regular" ? "gold" : plan
+                  }
                   onChange={(event) =>
                     setPlan(event.target.value as "gold" | "regular")
                   }
                   className="mt-1 h-11 w-full rounded-lg border border-slate-300 bg-white px-3"
                   disabled={saving}
                 >
-                  <option value="regular">Regular</option>
-                  <option value="gold">Gold</option>
+                  {regularOptionAllowed ? (
+                    <option value="regular">Regular</option>
+                  ) : null}
+                  {goldOptionAllowed ? (
+                    <option value="gold">
+                      {selectedIsActiveGold
+                        ? "Gold (renew)"
+                        : "Gold (convert)"}
+                    </option>
+                  ) : null}
                 </select>
               </label>
+              {manualDowngradeBlock ? (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {manualDowngradeBlock} Use{" "}
+                  <span className="font-semibold">Run expiry sweep now</span>{" "}
+                  after the expiry date has passed.
+                </p>
+              ) : null}
+              {!goldOptionAllowed ? (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Convert to Gold Membership requires the{" "}
+                  <span className="font-semibold">
+                    members.convert_regular_to_gold
+                  </span>{" "}
+                  permission.
+                </p>
+              ) : null}
 
               {plan === "gold" ? (
                 <label className="block text-sm font-semibold text-slate-700">
@@ -448,13 +530,15 @@ export function MembershipManagementPanel() {
 
               <button
                 type="submit"
-                disabled={saving}
+                disabled={saving || !canSubmitPlan}
                 className="h-11 w-full rounded-lg bg-slate-900 text-sm font-bold text-white disabled:opacity-50"
               >
                 {saving
                   ? "Saving…"
                   : plan === "gold"
-                    ? "Save / renew Gold"
+                    ? selectedIsActiveGold
+                      ? "Save / renew Gold"
+                      : "Convert to Gold Membership"
                     : "Set Regular"}
               </button>
             </form>

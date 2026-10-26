@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
-import { writeAdminAuditLog, clientMetaFromRequest } from "@/lib/admin-audit";
+import { clientMetaFromRequest, writeAdminAuditLog } from "@/lib/admin-audit";
 
 type VerifyPayload = {
   userId?: string;
@@ -37,19 +37,37 @@ export async function POST(request: Request) {
   }
 
   const nowIso = new Date().toISOString();
-  const actorLabel =
-    gate.actor.displayName || gate.actor.username || "admin";
+  const actorLabel = gate.actor.displayName || gate.actor.username || "admin";
 
-  const { error } = await gate.supabase
+  let { error } = await gate.supabase
     .from("users")
     .update({
       verified: true,
       verification_status: "approved",
+      verification_rejection_reason: null,
       verification_reviewed_by: actorLabel,
       verification_reviewed_at: nowIso,
       verification_reviewed_by_admin_id: gate.actor.id,
     })
     .eq("id", userId);
+
+  if (
+    error &&
+    (error.code === "42703" ||
+      /verification_rejection_reason/i.test(error.message))
+  ) {
+    const fallback = await gate.supabase
+      .from("users")
+      .update({
+        verified: true,
+        verification_status: "approved",
+        verification_reviewed_by: actorLabel,
+        verification_reviewed_at: nowIso,
+        verification_reviewed_by_admin_id: gate.actor.id,
+      })
+      .eq("id", userId);
+    error = fallback.error;
+  }
 
   if (error) {
     void writeAdminAuditLog({
