@@ -1152,12 +1152,15 @@ export function DashboardTabs({
     const silver = Number(silverMinutes);
 
     if (
-      ![diamond, gold, silver].every(
-        (n) => Number.isInteger(n) && n > 0 && n <= 1440,
-      )
+      !([diamondMinutes, goldMinutes, silverMinutes].every((value) =>
+        /^\d+$/.test(value.trim()),
+      ) &&
+        [diamond, gold, silver].every(
+          (n) => Number.isInteger(n) && n >= 0 && n <= 1440,
+        ))
     ) {
       setPrioritySettingsMessage(
-        "Each duration must be a whole number between 1 and 1440 minutes.",
+        "Each duration must be a whole number between 0 and 1440 minutes.",
       );
       return;
     }
@@ -5149,7 +5152,7 @@ export function DashboardTabs({
               <div className="flex items-center gap-2">
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={1440}
                   value={diamondMinutes}
                   onChange={(e) => setDiamondMinutes(e.target.value)}
@@ -5171,7 +5174,7 @@ export function DashboardTabs({
               <div className="flex items-center gap-2">
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={1440}
                   value={goldMinutes}
                   onChange={(e) => setGoldMinutes(e.target.value)}
@@ -5193,7 +5196,7 @@ export function DashboardTabs({
               <div className="flex items-center gap-2">
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={1440}
                   value={silverMinutes}
                   onChange={(e) => setSilverMinutes(e.target.value)}
