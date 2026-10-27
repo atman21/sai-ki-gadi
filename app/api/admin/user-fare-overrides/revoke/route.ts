@@ -3,11 +3,6 @@ import { NextResponse } from "next/server";
 import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
-type Body = {
-  overrideId?: string;
-  reason?: string;
-};
-
 export async function POST(request: Request) {
   const gate = await requireAdminPermission("fare_overrides.manage", {
     request,
@@ -15,7 +10,11 @@ export async function POST(request: Request) {
   });
   if (!gate.ok) return gate.response;
 
-  const body = (await request.json().catch(() => ({}))) as Body;
+  const rawBody: unknown = await request.json().catch(() => null);
+  const body: Record<string, unknown> =
+    rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+      ? (rawBody as Record<string, unknown>)
+      : {};
   const overrideId = typeof body.overrideId === "string" ? body.overrideId.trim() : "";
   const reason = typeof body.reason === "string" ? body.reason.trim() : "";
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(overrideId)) {
