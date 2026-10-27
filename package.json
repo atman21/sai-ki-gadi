@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:admin-helpers": "node scripts/verify-admin-feature-helpers.mjs",
     "test:phone-actions": "node scripts/verify-phone-actions.mjs",
-    "test:admin-audit": "node scripts/verify-admin-audit-helpers.mjs"
+    "test:admin-audit": "node scripts/verify-admin-audit-helpers.mjs",
+    "test:s0-2-rbac": "node scripts/verify-s0-2-fare-revoke-rbac.mjs"
   },
   "dependencies": {
     "@google-cloud/text-to-speech": "^6.4.1",
