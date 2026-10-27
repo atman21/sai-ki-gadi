@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const source = fs.readFileSync(path.join(root, "app/api/admin/user-fare-overrides/revoke/route.ts"), "utf8");
+
+assert.match(source, /requireAdminPermission\("fare_overrides[.]manage"/);
+assert.match(source, /if \(!gate[.]ok\) return gate[.]response/);
+assert.match(source, /await gate[.]supabase[.]rpc\("revoke_user_fare_override"/);
+assert.match(source, /auditModule: "fare_overrides"/);
+assert.doesNotMatch(source, /requireAdminApi[(]/);
+console.log("S0-2 fare override revoke RBAC contract checks passed.");
