@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/in-app-announcements/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -34,7 +34,10 @@ function buildLegacySearchOr(q: string): string {
 }
 
 export async function GET(request: Request) {
-  const auth = await requireAdminApi();
+  const auth = await requireAdminPermission("announcements.manage", {
+    request,
+    auditModule: "announcements",
+  });
   if (!auth.ok) return auth.response;
 
   const { searchParams } = new URL(request.url);
