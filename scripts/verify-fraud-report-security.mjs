@@ -45,4 +45,16 @@ assert.match(route, /requireAdminPermission\("fraud\.manage"/);
 assert.match(route, /if \(!adminGate\.ok\) return adminGate\.response/);
 assert.match(route, /parseFraudReportCreateInput\(json\)/);
 assert.doesNotMatch(route, /requireAdminApi\(/);
+
+const itemRoute = file("app/api/admin/fraud-reports/[id]/route.ts");
+assert.match(itemRoute, /requireAdminPermission\("fraud\.manage"/);
+assert.match(itemRoute, /parseFraudReportCreateInput\(json\)/);
+assert.match(itemRoute, /isFraudReportUuid\(id\)/);
+assert.doesNotMatch(itemRoute, /requireAdminApi\(/);
+assert.doesNotMatch(itemRoute, /error: error\.message/);
+
+const screen = file("app/dashboard/dashboard-tabs.tsx");
+assert.match(screen, /adminAccess\.can\("fraud\.manage"\)/);
+assert.match(screen, /canManageFraud/);
+
 console.log("Fraud report admin authorization + input validation: passed");
