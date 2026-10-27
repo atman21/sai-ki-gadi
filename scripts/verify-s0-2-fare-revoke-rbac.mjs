@@ -10,4 +10,7 @@ assert.match(source, /if \(!gate[.]ok\) return gate[.]response/);
 assert.match(source, /await gate[.]supabase[.]rpc\("revoke_user_fare_override"/);
 assert.match(source, /auditModule: "fare_overrides"/);
 assert.doesNotMatch(source, /requireAdminApi[(]/);
+assert.match(source, /typeof rawBody === "object"/);
+assert.match(source, /!Array[.]isArray[(]rawBody[)]/);
+assert.match(source, /typeof body[.]overrideId === "string"/);
 console.log("S0-2 fare override revoke RBAC contract checks passed.");
