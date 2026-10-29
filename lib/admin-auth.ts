@@ -15,28 +15,57 @@ export type AdminSessionPayload = {
   exp: number;
 };
 
-/** Prefer env in production. Hardcoded fallback is documented as a known risk. */
+const BLOCKED_ADMIN_PASSWORD = ["1234", "5678"].join("");
+const BLOCKED_SESSION_SECRET = ["merigaadi-dev-session-secret", "change-me"].join(
+  "-",
+);
+const MIN_SESSION_SECRET_LENGTH = 32;
+
+export class AdminSessionConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AdminSessionConfigError";
+  }
+}
+
+/** Username is not a secret. Password and session signing have no code default. */
 export function getAdminUsername(): string {
   return process.env.ADMIN_USERNAME?.trim() || "admin";
 }
 
-export function getAdminPassword(): string {
-  return process.env.ADMIN_PASSWORD ?? "12345678";
+/**
+ * Env bootstrap password only. Missing and the historical development
+ * password are refused so a forgotten env var cannot sign in.
+ */
+export function getAdminPassword(): string | null {
+  const value = process.env.ADMIN_PASSWORD?.trim() ?? "";
+  if (!value || value === BLOCKED_ADMIN_PASSWORD) return null;
+  return value;
+}
+
+export function adminSessionConfigIssue(): string | null {
+  const secret = process.env.ADMIN_SESSION_SECRET?.trim() ?? "";
+  if (!secret || secret === BLOCKED_SESSION_SECRET) {
+    return "Set ADMIN_SESSION_SECRET to a unique server-only value.";
+  }
+  if (secret.length < MIN_SESSION_SECRET_LENGTH) {
+    return "ADMIN_SESSION_SECRET must be at least 32 characters.";
+  }
+  const password = process.env.ADMIN_PASSWORD?.trim() ?? "";
+  if (password && secret === password) {
+    return "ADMIN_SESSION_SECRET must be different from ADMIN_PASSWORD.";
+  }
+  return null;
 }
 
 function getSessionSecret(): string {
-  return (
-    process.env.ADMIN_SESSION_SECRET?.trim() ||
-    process.env.ADMIN_PASSWORD?.trim() ||
-    "merigaadi-dev-session-secret-change-me"
-  );
+  const issue = adminSessionConfigIssue();
+  if (issue) throw new AdminSessionConfigError(issue);
+  return process.env.ADMIN_SESSION_SECRET!.trim();
 }
 
 /** @deprecated Use getAdminUsername() — kept for any residual imports. */
 export const ADMIN_USERNAME = getAdminUsername();
-
-/** @deprecated Use getAdminPassword() — kept for any residual imports. */
-export const ADMIN_PASSWORD = getAdminPassword();
 
 export function createAdminSessionValue(
   input?: Partial<
@@ -69,7 +98,7 @@ export function createAdminSessionValue(
 export function parseAdminSessionValue(
   value: string | undefined,
 ): AdminSessionPayload | null {
-  if (!value) return null;
+  if (!value || adminSessionConfigIssue()) return null;
 
   const parts = value.split(".");
   if (parts.length !== 2) return null;

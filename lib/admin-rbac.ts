@@ -218,10 +218,12 @@ export async function authenticateAdminLogin(
     };
   }
 
-  // 2) Env bootstrap Super Admin (backward compatible)
+  // 2) Env bootstrap Super Admin. Disabled when ADMIN_PASSWORD is unset
+  // or still the historical development password.
   const envUser = getAdminUsername();
   const envPass = getAdminPassword();
   if (
+    envPass !== null &&
     safeEqualString(trimmed, envUser) &&
     safeEqualString(password, envPass)
   ) {
