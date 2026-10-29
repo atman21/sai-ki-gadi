@@ -1,20 +1,23 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
-type Body = {
-  overrideId?: string;
-  reason?: string;
-};
-
 export async function POST(request: Request) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("fare_overrides.manage", {
+    request,
+    auditModule: "fare_overrides",
+  });
   if (!gate.ok) return gate.response;
 
-  const body = (await request.json().catch(() => ({}))) as Body;
-  const overrideId = body.overrideId?.trim() ?? "";
-  if (!overrideId) {
+  const rawBody: unknown = await request.json().catch(() => null);
+  const body: Record<string, unknown> =
+    rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+      ? (rawBody as Record<string, unknown>)
+      : {};
+  const overrideId = typeof body.overrideId === "string" ? body.overrideId.trim() : "";
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(overrideId)) {
     return NextResponse.json(
       { ok: false, error: "overrideId is required." },
       { status: 400 },
@@ -34,10 +37,10 @@ export async function POST(request: Request) {
   const { data, error } = await gate.supabase.rpc("revoke_user_fare_override", {
     p_override_id: overrideId,
     p_revoked_by: "admin",
-    p_reason: body.reason?.trim() || null,
+    p_reason: reason || null,
   });
 
-  const revokeReason = body.reason?.trim() || null;
+  const revokeReason = reason || null;
 
   if (error) {
     void recordFailure({
