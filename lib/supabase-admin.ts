@@ -1,5 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  publicServiceRoleConfigured,
+  publicServiceRoleStartupError,
+} from "@/lib/service-role-env";
+
 /**
  * Server-only privileged Supabase client for the Admin Panel.
  *
@@ -16,6 +21,11 @@ if (typeof window !== "undefined") {
   throw new Error(
     "lib/supabase-admin.ts is server-only and must not be imported in the browser.",
   );
+}
+
+const exposedServiceRole = publicServiceRoleStartupError();
+if (exposedServiceRole) {
+  throw new Error(exposedServiceRole);
 }
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
@@ -74,14 +84,10 @@ export const usingServiceRole =
 
 /** Human-readable reason when admin cannot bypass RLS (safe — no secrets). */
 export function serviceRoleConfigIssue(): string | null {
-  if (usingServiceRole) return null;
+  const exposed = publicServiceRoleStartupError();
+  if (exposed || publicServiceRoleConfigured()) return exposed;
 
-  // Detect accidental NEXT_PUBLIC exposure of a service key name
-  const publicServiceKey =
-    process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY?.trim() ?? "";
-  if (publicServiceKey) {
-    return "Remove NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY. Use server-only SUPABASE_SERVICE_ROLE_KEY instead (never NEXT_PUBLIC_).";
-  }
+  if (usingServiceRole) return null;
 
   if (!supabaseServiceRoleKey) {
     return "SUPABASE_SERVICE_ROLE_KEY is not set in .env.local (server-only).";

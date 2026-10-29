@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   ADMIN_SESSION_COOKIE,
   ADMIN_SESSION_MAX_AGE_SECONDS,
+  adminSessionConfigIssue,
   createAdminSessionValue,
 } from "@/lib/admin-auth";
 import { writeAdminAuditLog, clientMetaFromRequest } from "@/lib/admin-audit";
@@ -62,6 +63,17 @@ export async function POST(request: Request) {
   }
 
   clearLoginRateLimit(rateKey);
+
+  const sessionIssue = adminSessionConfigIssue();
+  if (sessionIssue) {
+    console.error(
+      JSON.stringify({ event: "admin-session-misconfigured", issue: sessionIssue }),
+    );
+    return NextResponse.json(
+      { ok: false, error: "Admin sign-in is not configured." },
+      { status: 503 },
+    );
+  }
 
   void writeAdminAuditLog({
     actor: result.actor,
