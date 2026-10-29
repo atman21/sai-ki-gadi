@@ -23,4 +23,7 @@ assert.match(announcementsSearch, /requireAdminPermission\("announcements[.]mana
 assert.match(announcementsSearch, /auditModule: "announcements"/);
 assert.match(announcementsSearch, /if \(!auth[.]ok\) return auth[.]response/);
 assert.doesNotMatch(announcementsSearch, /requireAdminApi[(]/);
+assert.doesNotMatch(announcementsSearch, /[.]from[(]"users"[)]/);
+assert.match(announcementsSearch, /Announcement user search is temporarily unavailable[.]/);
+assert.match(announcementsSearch, /status: 503/);
 console.log("S0-2 announcement member search RBAC contract checks passed.");
