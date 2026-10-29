@@ -69,6 +69,37 @@ Do this only after an explicit owner approval. Do not rotate the key before the 
 - JWT secret already rotated: recovery is the previous JWT secret or a mobile build with the new anon key. Do not start that rotation here.
 - An Edge Function fails because `SUPABASE_ANON_KEY` is missing: set the anon key in the function secrets. Do not point the user-auth client at the service-role key.
 
-## Remaining risk
+## Compatibility with Admin PR #17
 
-The service-role key has lived in a public-prefixed variable on the server. Current client chunks did not contain it, but the value must still be treated as exposed. Rotation is the remaining control, and it is not done in this change. `send-push` still uses the service-role key inside the function and does not check the caller in its own code. Leave that for a separate review so notification delivery is not changed here.
+A merge of this branch with `security/s0-2-fare-revoke-rbac` conflicts only in `package.json`. Both sides add a script after `test:admin-audit`. Keep both:
+
+- `test:s0-2-rbac`
+- `test:service-role-hardening`
+
+No RBAC source file is changed here. Do not drop PR #17's fare, announcement, or permission checks when resolving that script list.
+
+## Environment precedence
+
+No `.env` file is committed. Next.js 16 uses the first match of: process environment (PM2), `.env.production.local`, `.env.local`, `.env.production`, `.env`. `NEXT_PUBLIC_*` values are frozen at `next build`. Server-only keys are read per request. Remove `NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY` from PM2 and every `.env*` file before building this branch. `next.config.ts` has no `env` bundle map.
+
+## Admin sign-in credentials
+
+`ADMIN_PASSWORD` is not required for database admin login. `admin_panel_users` is readable only with the server-only service key. The password checked is that row's `password_hash`.
+
+Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, server-only `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_SESSION_SECRET` (at least 32 characters and different from `ADMIN_PASSWORD`), and one active `admin_panel_users` row. `ADMIN_USERNAME` / `ADMIN_PASSWORD` apply only when no database user matches. A missing session secret makes sign-in return 503.
+
+## Replacing the legacy service-role JWT
+
+A new `sb_secret_` key can be placed in server-only `SUPABASE_SERVICE_ROLE_KEY` without rotating the JWT signing secret and without changing the anon key in installed Android builds. Do not disable the legacy anon/`service_role` pair until a later app release, because that disable also removes the anon key those installs send. The leaked legacy JWT remains valid until that later disable.
+
+## Production procedure
+
+Owner approval is required. Nothing here has been executed.
+
+1. Record PM2 name, cwd, script, and `git rev-parse HEAD` for `/var/www/apps/sai-ki-gadi`. Copy env files and the PM2 dump outside the web root. Confirm Nginx targets port 3000, not 3001.
+2. Check names only: server-only service key, `ADMIN_SESSION_SECRET`, an active database admin, and whether the public-prefixed service-role name is set.
+3. Delete that public-prefixed name from PM2 and every `.env*` file.
+4. Restart the current release with `--update-env`. Sign in with a database admin and open one privileged page. On failure, restore the backup without the public-prefixed name.
+5. Build this commit only after step 3. Run `npm ci`, `npx tsc --noEmit`, and `npm run build`.
+6. Restart PM2 on this build. Sign in again. Search `.next/static` for `service_role` without printing secret lines.
+7. Rollback is the recorded previous commit plus the cleaned env. Do not restore the public-prefixed name and do not rotate the JWT signing secret.
