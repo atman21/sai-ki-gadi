@@ -19,8 +19,8 @@ const announcementsSearch = fs.readFileSync(
   path.join(root, "app/api/admin/in-app-announcements/users-search/route.ts"),
   "utf8",
 );
-assert.match(announcementsSearch, /requireAdminPermission\\("announcements[.]manage"/);
+assert.match(announcementsSearch, /requireAdminPermission\("announcements[.]manage"/);
 assert.match(announcementsSearch, /auditModule: "announcements"/);
-assert.match(announcementsSearch, /if \\(!auth[.]ok\\) return auth[.]response/);
+assert.match(announcementsSearch, /if \(!auth[.]ok\) return auth[.]response/);
 assert.doesNotMatch(announcementsSearch, /requireAdminApi[(]/);
 console.log("S0-2 announcement member search RBAC contract checks passed.");
