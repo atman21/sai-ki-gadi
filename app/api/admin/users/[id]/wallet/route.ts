@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
+import {
+  evaluateLuckyDrawExpiry,
+  kolkataDateKey,
+} from "@/lib/lucky-draw-prize-expiry";
 
 type WalletTransactionType = "credit" | "debit";
 
@@ -133,6 +137,19 @@ export async function POST(
     return NextResponse.json(
       { ok: false, error: "A valid idempotency key is required." },
       { status: 400 },
+    );
+  }
+
+  const expiry = evaluateLuckyDrawExpiry({
+    transactionType,
+    source,
+    expiresOnRaw: body.expires_on,
+    todayKey: kolkataDateKey(),
+  });
+  if (expiry.action !== "post") {
+    return NextResponse.json(
+      { ok: false, error: expiry.error },
+      { status: expiry.status },
     );
   }
 

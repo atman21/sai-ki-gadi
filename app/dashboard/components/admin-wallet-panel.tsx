@@ -2,6 +2,11 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  evaluateLuckyDrawExpiry,
+  kolkataDateKey,
+} from "@/lib/lucky-draw-prize-expiry";
+
 type WalletTransaction = {
   id: string;
   transaction_type: "credit" | "debit";
@@ -85,7 +90,9 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
   const [source, setSource] = useState("lucky_draw_prize");
   const [remarks, setRemarks] = useState("");
   const [referenceId, setReferenceId] = useState("");
+  const [expiresOn, setExpiresOn] = useState("");
   const pendingSubmission = useRef<{ fingerprint: string; key: string } | null>(null);
+  const expiryAllowed = transactionType === "credit" && source === "lucky_draw_prize";
 
   const loadWallet = useCallback(async () => {
     setError(null);
@@ -113,6 +120,10 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
   useEffect(() => {
     setSource(transactionType === "credit" ? "lucky_draw_prize" : "wallet_usage");
   }, [transactionType]);
+
+  useEffect(() => {
+    if (!expiryAllowed) setExpiresOn("");
+  }, [expiryAllowed]);
 
   const parsedAmount = Number(amount);
   const balanceAfter = useMemo(() => {
@@ -142,6 +153,17 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       return;
     }
 
+    const expiry = evaluateLuckyDrawExpiry({
+      transactionType,
+      source,
+      expiresOnRaw: expiryAllowed ? expiresOn : "",
+      todayKey: kolkataDateKey(),
+    });
+    if (expiry.action !== "post") {
+      setError(expiry.error);
+      return;
+    }
+
     const confirmed = window.confirm(
       `${transactionType === "credit" ? "Credit" : "Debit"} ${money(parsedAmount)}?\n\nThis financial ledger entry cannot be edited or deleted.`,
     );
@@ -153,6 +175,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       source,
       remarks: remarks.trim(),
       reference_id: referenceId.trim() || null,
+      expires_on: expiresOn.trim() || null,
     });
     if (!pendingSubmission.current || pendingSubmission.current.fingerprint !== fingerprint) {
       pendingSubmission.current = {
@@ -172,9 +195,10 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
           source,
           remarks: remarks.trim(),
           reference_type: referenceId.trim() ? source : null,
-          reference_id: referenceId.trim() || null,
-          idempotency_key: pendingSubmission.current.key,
-        }),
+            reference_id: referenceId.trim() || null,
+            expires_on: expiresOn.trim() || null,
+            idempotency_key: pendingSubmission.current.key,
+          }),
       });
       const data = (await response.json()) as { ok: boolean; error?: string };
       if (!response.ok || !data.ok) {
@@ -185,6 +209,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       setAmount("");
       setRemarks("");
       setReferenceId("");
+      setExpiresOn("");
       setSuccess("Wallet transaction posted successfully.");
       setLoading(true);
       await loadWallet();
@@ -267,6 +292,25 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
               disabled={posting}
             />
           </label>
+
+          {expiryAllowed ? (
+            <label className="text-sm font-semibold text-slate-700">
+              Expiry date{" "}
+              <span className="font-normal text-slate-400">(optional)</span>
+              <input
+                type="date"
+                value={expiresOn}
+                min={kolkataDateKey()}
+                onChange={(event) => setExpiresOn(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
+                disabled={posting}
+              />
+              <span className="mt-1 block text-xs font-normal text-slate-500">
+                India Standard Time. Leave blank for no expiry. A date is not
+                stored until the ledger contract is reviewed.
+              </span>
+            </label>
+          ) : null}
 
           <label className="text-sm font-semibold text-slate-700 md:col-span-2 lg:col-span-3">
             Remarks <span className="text-red-600">*</span>
