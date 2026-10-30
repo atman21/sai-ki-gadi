@@ -1,50 +1,49 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
-
-const IDENTITY_BUCKET = "identity-documents";
-
-const allowedPathFields = [
-  "driving_license_front_path",
-  "driving_license_back_path",
-  "aadhaar_front_path",
-  "aadhaar_back_path",
-  "aadhaar_file_path",
-  "pan_file_path",
-  "gst_file_path",
-] as const;
-
-type AllowedPathField = (typeof allowedPathFields)[number];
-
-const legacyFlagByPathField: Partial<Record<AllowedPathField, string>> = {
-  aadhaar_file_path: "aadhaar_uploaded",
-  pan_file_path: "pan_uploaded",
-  gst_file_path: "gst_uploaded",
-};
-
-type DeletePayload = {
-  userId?: string;
-  pathField?: string;
-};
-
-function isAllowedPathField(value: string): value is AllowedPathField {
-  return allowedPathFields.includes(value as AllowedPathField);
-}
+import {
+  clientMetaFromRequest,
+  writeAdminAuditLog,
+} from "@/lib/admin-audit";
+import {
+  IDENTITY_DOCUMENTS_BUCKET,
+  actorCanMutateIdentityDocuments,
+  buildIdentityDocumentClearPayload,
+  buildIdentityDocumentDeleteAuditMetadata,
+  parseIdentityDocumentDeleteBody,
+  resolveIdentityDocumentDeleteTarget,
+} from "@/lib/admin-identity-documents";
 
 export async function POST(request: Request) {
-  // requireAdminApi fails closed (503) when service-role is missing/invalid,
-  // so this mutation cannot return ok:true under anon/RLS no-op behavior.
   const gate = await requireAdminApi();
   if (!gate.ok) return gate.response;
-  const { supabase } = gate;
+  const { supabase, actor } = gate;
 
-  const body = (await request.json().catch(() => ({}))) as DeletePayload;
-  const userId = body.userId?.trim() ?? "";
-  const pathField = body.pathField?.trim() ?? "";
-
-  if (!userId || !pathField || !isAllowedPathField(pathField)) {
-    return NextResponse.json({ ok: false, error: "Invalid request payload." }, { status: 400 });
+  if (!actorCanMutateIdentityDocuments(actor)) {
+    void writeAdminAuditLog({
+      actor,
+      action: "permission_denied",
+      module: "members",
+      description: "Permission denied for identity document delete",
+      success: false,
+      metadata: {
+        requiredAnyOf: ["members.edit", "members.approve", "members.reject"],
+      },
+      ...clientMetaFromRequest(request),
+    });
+    return NextResponse.json(
+      { ok: false, error: "Forbidden — insufficient permissions." },
+      { status: 403 },
+    );
   }
+
+  const body = (await request.json().catch(() => ({}))) as unknown;
+  const parsed = parseIdentityDocumentDeleteBody(body);
+  if (!parsed.ok) {
+    return NextResponse.json({ ok: false, error: parsed.error }, { status: 400 });
+  }
+
+  const { userId, pathField } = parsed;
 
   const { data: row, error: readError } = await supabase
     .from("user_identity_documents")
@@ -54,48 +53,153 @@ export async function POST(request: Request) {
 
   if (readError) {
     return NextResponse.json(
-      { ok: false, error: safeErrorMessage(readError, "Failed to load document.") },
-      { status: 400 },
-    );
-  }
-
-  const rowRecord = row as Record<string, unknown> | null;
-  const currentPath = rowRecord?.[pathField];
-  if (typeof currentPath !== "string" || currentPath.length === 0) {
-    return NextResponse.json({ ok: false, error: "Document path not found." }, { status: 404 });
-  }
-
-  const { error: deleteStorageError } = await supabase.storage
-    .from(IDENTITY_BUCKET)
-    .remove([currentPath]);
-
-  if (deleteStorageError) {
-    return NextResponse.json(
       {
         ok: false,
-        error: safeErrorMessage(deleteStorageError, "Failed to delete document file."),
+        error: safeErrorMessage(readError, "Failed to load document."),
       },
       { status: 400 },
     );
   }
 
-  const updatePayload: Record<string, unknown> = { [pathField]: null };
-  const legacyFlag = legacyFlagByPathField[pathField];
-  if (legacyFlag) {
-    updatePayload[legacyFlag] = false;
+  const resolved = resolveIdentityDocumentDeleteTarget({
+    userId,
+    pathField,
+    row: (row as Record<string, unknown> | null) ?? null,
+  });
+  if (!resolved.ok) {
+    return NextResponse.json(
+      { ok: false, error: resolved.error },
+      { status: resolved.status },
+    );
   }
 
-  const { error: updateError } = await supabase
-    .from("user_identity_documents")
-    .update(updatePayload)
-    .eq("user_id", userId);
+  const { error: deleteStorageError } = await supabase.storage
+    .from(IDENTITY_DOCUMENTS_BUCKET)
+    .remove([resolved.storagePath]);
 
-  if (updateError) {
+  if (deleteStorageError) {
+    void writeAdminAuditLog({
+      actor,
+      action: "identity_document_delete_failed",
+      module: "members",
+      description: `Failed to delete identity document (${pathField}) for user ${userId}`,
+      success: false,
+      resourceType: "user",
+      resourceId: userId,
+      metadata: {
+        ...buildIdentityDocumentDeleteAuditMetadata({
+          pathField,
+          storagePath: resolved.storagePath,
+          bucket: IDENTITY_DOCUMENTS_BUCKET,
+        }),
+        stage: "storage_remove",
+      },
+      ...clientMetaFromRequest(request),
+    });
     return NextResponse.json(
-      { ok: false, error: safeErrorMessage(updateError, "Failed to clear document path.") },
+      {
+        ok: false,
+        error: safeErrorMessage(
+          deleteStorageError,
+          "Failed to delete document file.",
+        ),
+      },
       { status: 400 },
     );
   }
+
+  const updatePayload = buildIdentityDocumentClearPayload(
+    pathField,
+    resolved.legacyFlag,
+  );
+
+  const { data: updatedRow, error: updateError } = await supabase
+    .from("user_identity_documents")
+    .update(updatePayload)
+    .eq("user_id", userId)
+    .select(pathField)
+    .maybeSingle();
+
+  if (updateError) {
+    void writeAdminAuditLog({
+      actor,
+      action: "identity_document_delete_failed",
+      module: "members",
+      description: `Storage removed but failed to clear identity document (${pathField}) for user ${userId}`,
+      success: false,
+      resourceType: "user",
+      resourceId: userId,
+      metadata: {
+        ...buildIdentityDocumentDeleteAuditMetadata({
+          pathField,
+          storagePath: resolved.storagePath,
+          bucket: IDENTITY_DOCUMENTS_BUCKET,
+        }),
+        stage: "database_clear",
+      },
+      ...clientMetaFromRequest(request),
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: safeErrorMessage(
+          updateError,
+          "Failed to clear document path.",
+        ),
+      },
+      { status: 400 },
+    );
+  }
+
+  const clearedValue = (updatedRow as Record<string, unknown> | null)?.[
+    pathField
+  ];
+  if (updatedRow == null || clearedValue) {
+    void writeAdminAuditLog({
+      actor,
+      action: "identity_document_delete_failed",
+      module: "members",
+      description: `Failed to confirm identity document clear (${pathField}) for user ${userId}`,
+      success: false,
+      resourceType: "user",
+      resourceId: userId,
+      metadata: {
+        ...buildIdentityDocumentDeleteAuditMetadata({
+          pathField,
+          storagePath: resolved.storagePath,
+          bucket: IDENTITY_DOCUMENTS_BUCKET,
+        }),
+        stage: "database_confirm",
+      },
+      ...clientMetaFromRequest(request),
+    });
+    return NextResponse.json(
+      { ok: false, error: "Failed to clear document path." },
+      { status: 400 },
+    );
+  }
+
+  const actorLabel = actor.displayName || actor.username || "admin";
+  void writeAdminAuditLog({
+    actor,
+    action: "identity_document_deleted",
+    module: "members",
+    description: `Identity document ${pathField} deleted for user ${userId} by ${actorLabel}`,
+    success: true,
+    resourceType: "user",
+    resourceId: userId,
+    changedFields: resolved.legacyFlag
+      ? [pathField, resolved.legacyFlag]
+      : [pathField],
+    beforeData: { [pathField]: "(present)" },
+    afterData: { [pathField]: null },
+    metadata: buildIdentityDocumentDeleteAuditMetadata({
+      pathField,
+      storagePath: resolved.storagePath,
+      bucket: IDENTITY_DOCUMENTS_BUCKET,
+    }),
+    ...clientMetaFromRequest(request),
+  });
 
   return NextResponse.json({ ok: true });
 }
