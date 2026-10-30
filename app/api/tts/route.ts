@@ -1,28 +1,54 @@
 import textToSpeech from "@google-cloud/text-to-speech";
 import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
 
-const client = new textToSpeech.TextToSpeechClient({
-  keyFilename: "./google-tts.json",
-});
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
+import {
+  languageToBcp47,
+  validateTtsRequestBody,
+  writeNewNotificationMp3,
+} from "@/lib/admin-tts";
 
-export async function POST(req: Request) {
+/**
+ * Admin TTS generation.
+ * Permission: announcements.manage (narrowest existing key tied to announcement
+ * TTS fields / future announcement audio). Super Admin bypasses via RBAC helper.
+ * Continues writing under public/notifications so returned URLs stay compatible
+ * with historical /notifications/{file}.mp3 playback. Never overwrites existing files.
+ */
+export async function POST(request: Request) {
+  const gate = await requireAdminPermission("announcements.manage", {
+    request,
+    auditModule: "tts",
+  });
+  if (!gate.ok) return gate.response;
+
+  let body: unknown;
   try {
-    const { text, language } = await req.json();
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, success: false, error: "Invalid JSON body." },
+      { status: 400 },
+    );
+  }
 
-    let languageCode = "gu-IN";
+  const validated = validateTtsRequestBody(body);
+  if (!validated.ok) {
+    return NextResponse.json(
+      { ok: false, success: false, error: validated.error },
+      { status: 400 },
+    );
+  }
 
-    if (language === "hi") languageCode = "hi-IN";
-
-    if (language === "en") languageCode = "en-IN";
+  try {
+    const client = new textToSpeech.TextToSpeechClient({
+      keyFilename: "./google-tts.json",
+    });
 
     const [response] = await client.synthesizeSpeech({
-      input: {
-        text,   
-      },
+      input: { text: validated.text },
       voice: {
-        languageCode,
+        languageCode: languageToBcp47(validated.language),
         ssmlGender: "FEMALE",
       },
       audioConfig: {
@@ -30,29 +56,45 @@ export async function POST(req: Request) {
       },
     });
 
-    const filename = `${Date.now()}.mp3`;
-
-    const filepath = path.join(
-      process.cwd(),
-      "public",
-      "notifications",
-      filename,
-    );
-
-    if (!response.audioContent) throw new Error("No audio");
+    if (!response.audioContent) {
+      return NextResponse.json(
+        { ok: false, success: false, error: "No audio generated." },
+        { status: 502 },
+      );
+    }
 
     const audioBuffer = Buffer.from(response.audioContent as Uint8Array);
+    const written = writeNewNotificationMp3(audioBuffer);
+    if (!written.ok) {
+      const status = written.code === "EEXIST" ? 409 : 500;
+      return NextResponse.json(
+        {
+          ok: false,
+          success: false,
+          error: written.error || "Unable to store audio.",
+        },
+        { status },
+      );
+    }
 
-    fs.writeFileSync(filepath, audioBuffer);
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+    const url = appUrl
+      ? `${appUrl}${written.publicUrlPath}`
+      : written.publicUrlPath;
 
     return NextResponse.json({
+      ok: true,
       success: true,
-      url: `${process.env.NEXT_PUBLIC_APP_URL}/notifications/${filename}`,
+      url,
     });
-  } catch (e) {
-    return NextResponse.json({
-      success: false,
-      error: String(e),
-    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        success: false,
+        error: safeErrorMessage(error, "Unable to generate speech."),
+      },
+      { status: 500 },
+    );
   }
 }
