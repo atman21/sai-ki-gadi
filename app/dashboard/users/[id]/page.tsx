@@ -1,4 +1,5 @@
 import { BackButton } from "@/app/components/back-button";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { AdminWalletPanel } from "@/app/dashboard/components/admin-wallet-panel";
@@ -8,9 +9,23 @@ import {
   adminUserFullName,
   normalizeAdminUserDetail,
 } from "@/app/dashboard/components/admin-user-profile-sections";
+import {
+  actorHasPermission,
+  resolveActorFromSession,
+} from "@/lib/admin-rbac";
+import { getAdminSessionPayload } from "@/lib/admin-session";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 import { DocumentManager } from "../../../dashboard/verification/[userId]/document-manager";
+
+async function actorHasWalletPermission(): Promise<boolean> {
+  const cookieStore = await cookies();
+  const session = getAdminSessionPayload(cookieStore);
+  if (!session) return false;
+  const actor = await resolveActorFromSession(session);
+  if (!actor || !actor.isActive) return false;
+  return actorHasPermission(actor, "members.wallet");
+}
 
 type IdentityDocRow = {
   user_id: string;
@@ -155,6 +170,7 @@ export default async function UserDetailPage({
   );
 
   const name = adminUserFullName(user);
+  const canManageWallet = await actorHasWalletPermission();
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -194,7 +210,7 @@ export default async function UserDetailPage({
           aadhaarNumber={docs?.aadhaar_number ?? null}
         />
 
-        <AdminWalletPanel userId={id} />
+        {canManageWallet ? <AdminWalletPanel userId={id} /> : null}
 
         <DocumentManager
           userId={id}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import { normalizeWalletAmount } from "@/lib/admin-wallet-amount";
 import { scopeWalletIdempotencyKey } from "@/lib/admin-wallet-idempotency";
 
@@ -34,7 +34,10 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("members.wallet", {
+    request,
+    auditModule: "wallet",
+  });
   if (!gate.ok) return gate.response;
 
   const { id } = await params;
@@ -121,7 +124,10 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("members.wallet", {
+    request,
+    auditModule: "wallet",
+  });
   if (!gate.ok) return gate.response;
 
   const { id } = await params;

@@ -4,6 +4,15 @@
  */
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function readRepoFile(...parts) {
+  return fs.readFileSync(path.join(root, ...parts), "utf8");
+}
 
 function normalizeWalletAmount(value) {
   const amount = typeof value === "number" ? value : Number(value);
@@ -134,5 +143,101 @@ assert.equal(scopeWalletIdempotencyKey("", "x"), null);
 // Unscoped client key is rebound to the path user
 const scoped = scopeWalletIdempotencyKey(userA, "admin-wallet-legacy-uuid");
 assert.ok(scoped.startsWith(`admin-wallet:${userA}:`));
+
+// --- members.wallet API + dashboard gates (S0 wallet permission) ---
+const walletRoute = readRepoFile(
+  "app",
+  "api",
+  "admin",
+  "users",
+  "[id]",
+  "wallet",
+  "route.ts",
+);
+assert.equal(
+  walletRoute.includes('requireAdminApi('),
+  false,
+  "wallet route must not use requireAdminApi alone",
+);
+assert.match(
+  walletRoute,
+  /requireAdminPermission\(\s*"members\.wallet"/,
+  "wallet GET/POST must require members.wallet",
+);
+const walletPermissionGates = [
+  ...walletRoute.matchAll(
+    /requireAdminPermission\(\s*"members\.wallet"/g,
+  ),
+];
+assert.equal(
+  walletPermissionGates.length,
+  2,
+  "members.wallet must gate both GET and POST",
+);
+assert.match(
+  walletRoute,
+  /auditModule:\s*"wallet"/,
+  "wallet permission denials must audit under wallet module",
+);
+assert.match(
+  walletRoute,
+  /scopeWalletIdempotencyKey/,
+  "idempotency scoping helper must remain in use",
+);
+
+const adminApi = readRepoFile("lib", "admin-api.ts");
+assert.match(
+  adminApi,
+  /\{\s*ok:\s*false,\s*error:\s*"Forbidden — insufficient permissions\."\s*\}/,
+  "forbidden JSON body must stay exact for permission denials",
+);
+assert.match(
+  adminApi,
+  /status:\s*403/,
+  "permission denials must return HTTP 403",
+);
+assert.match(
+  adminApi,
+  /action:\s*"permission_denied"/,
+  "denied attempts must be audited when requireAdminPermission fails",
+);
+
+const rbac = readRepoFile("lib", "admin-rbac.ts");
+assert.match(
+  rbac,
+  /if \(actor\.isSuperAdmin\) return true;/,
+  "Super Admin must retain all-permission bypass",
+);
+
+const userDetailPage = readRepoFile(
+  "app",
+  "dashboard",
+  "users",
+  "[id]",
+  "page.tsx",
+);
+assert.match(
+  userDetailPage,
+  /actorHasPermission\(actor,\s*"members\.wallet"\)/,
+  "user detail must resolve members.wallet for the current actor",
+);
+assert.match(
+  userDetailPage,
+  /canManageWallet\s*\?\s*<AdminWalletPanel[\s\S]*:\s*null/,
+  "wallet panel must render only when members.wallet is granted",
+);
+assert.equal(
+  /<AdminWalletPanel\s+userId=\{id\}\s*\/>/.test(userDetailPage) &&
+    !userDetailPage.includes("canManageWallet ?"),
+  false,
+  "AdminWalletPanel must not render unconditionally",
+);
+
+const permissions = readRepoFile("lib", "admin-permissions.ts");
+assert.match(
+  permissions,
+  /"wallet-management":\s*"members\.wallet"/,
+  "TAB_PERMISSION_MAP wallet-management must stay members.wallet",
+);
 
 console.log("verify-admin-feature-helpers: OK");
