@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:admin-helpers": "node scripts/verify-admin-feature-helpers.mjs",
     "test:admin-tts": "node scripts/verify-admin-tts-security.mjs",
-    "test:admin-auth-secrets": "node scripts/verify-admin-auth-secrets.mjs"
+    "test:admin-auth-secrets": "node scripts/verify-admin-auth-secrets.mjs",
+    "test:admin-supabase-secrets": "node scripts/verify-admin-supabase-secrets.mjs"
   },
   "dependencies": {
     "@google-cloud/text-to-speech": "^6.4.1",

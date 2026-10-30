@@ -1,5 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  getServerServiceRoleKey,
+  resolveServiceRoleConfig,
+} from "@/lib/supabase-service-role-config";
+
 /**
  * Server-only privileged Supabase client for the Admin Panel.
  *
@@ -21,78 +26,18 @@ if (typeof window !== "undefined") {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
 
-/** Server-only — never NEXT_PUBLIC_ */
-const supabaseServiceRoleKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? "";
-
-/** Decode JWT payload claims without verifying signature (config checks only). */
-function jwtClaims(token: string): { role?: string; ref?: string } | null {
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
-    const json =
-      typeof atob === "function"
-        ? atob(padded)
-        : Buffer.from(padded, "base64").toString("utf8");
-    return JSON.parse(json) as { role?: string; ref?: string };
-  } catch {
-    return null;
-  }
-}
-
-function looksLikeServiceRoleKey(key: string): boolean {
-  if (!key) return false;
-  // New Supabase secret key format
-  if (key.startsWith("sb_secret_")) return true;
-  // Legacy JWT — require role claim service_role (anon JWTs also start with eyJ)
-  if (key.startsWith("eyJ") && key.includes(".")) {
-    return jwtClaims(key)?.role === "service_role";
-  }
-  return false;
-}
-
-function looksLikePublishableOrAnonKey(key: string): boolean {
-  if (!key) return false;
-  if (key.startsWith("sb_publishable_")) return true;
-  if (key.startsWith("eyJ") && key.includes(".")) {
-    return jwtClaims(key)?.role === "anon";
-  }
-  return false;
-}
+const serviceRoleConfig = resolveServiceRoleConfig(process.env);
+const supabaseServiceRoleKey = getServerServiceRoleKey(process.env);
 
 /**
- * True only when a real service-role/secret key is configured server-side.
- * Publishable/anon keys do NOT bypass RLS.
+ * True only when a real server-only service-role/secret key is configured.
+ * Public NEXT_PUBLIC_* values are never treated as credentials.
  */
-export const usingServiceRole =
-  Boolean(supabaseServiceRoleKey) &&
-  looksLikeServiceRoleKey(supabaseServiceRoleKey) &&
-  !looksLikePublishableOrAnonKey(supabaseServiceRoleKey) &&
-  supabaseServiceRoleKey !== supabaseAnonKey;
+export const usingServiceRole = serviceRoleConfig.usingServiceRole;
 
 /** Human-readable reason when admin cannot bypass RLS (safe — no secrets). */
 export function serviceRoleConfigIssue(): string | null {
-  if (usingServiceRole) return null;
-
-  // Detect accidental NEXT_PUBLIC exposure of a service key name
-  const publicServiceKey =
-    process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY?.trim() ?? "";
-  if (publicServiceKey) {
-    return "Remove NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY. Use server-only SUPABASE_SERVICE_ROLE_KEY instead (never NEXT_PUBLIC_).";
-  }
-
-  if (!supabaseServiceRoleKey) {
-    return "SUPABASE_SERVICE_ROLE_KEY is not set in .env.local (server-only).";
-  }
-  if (supabaseServiceRoleKey === supabaseAnonKey) {
-    return "SUPABASE_SERVICE_ROLE_KEY is identical to the anon/publishable key.";
-  }
-  if (looksLikePublishableOrAnonKey(supabaseServiceRoleKey)) {
-    return "SUPABASE_SERVICE_ROLE_KEY is a publishable key; use this project's secret/service_role key.";
-  }
-  return "SUPABASE_SERVICE_ROLE_KEY does not look like a service-role/secret key.";
+  return resolveServiceRoleConfig(process.env).issue;
 }
 
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -102,9 +47,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 /**
- * Privileged admin client. Uses service-role key when valid; otherwise falls
- * back to anon (RLS applies — protected tables return empty). Prefer checking
- * usingServiceRole / serviceRoleConfigIssue() before relying on results.
+ * Privileged admin client. Uses server-only service-role key when valid;
+ * otherwise falls back to anon (RLS applies — protected tables return empty).
+ * Prefer checking usingServiceRole / serviceRoleConfigIssue() before relying
+ * on results. Never reads NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY as a credential.
  */
 export const supabaseAdmin: SupabaseClient = createClient(
   supabaseUrl,

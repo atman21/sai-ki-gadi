@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
 
 const IDENTITY_BUCKET = "identity-documents";
 
@@ -34,10 +32,11 @@ function isAllowedPathField(value: string): value is AllowedPathField {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  // requireAdminApi fails closed (503) when service-role is missing/invalid,
+  // so this mutation cannot return ok:true under anon/RLS no-op behavior.
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
+  const { supabase } = gate;
 
   const body = (await request.json().catch(() => ({}))) as DeletePayload;
   const userId = body.userId?.trim() ?? "";
@@ -47,14 +46,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Invalid request payload." }, { status: 400 });
   }
 
-  const { data: row, error: readError } = await supabaseAdmin
+  const { data: row, error: readError } = await supabase
     .from("user_identity_documents")
     .select(pathField)
     .eq("user_id", userId)
     .maybeSingle();
 
   if (readError) {
-    return NextResponse.json({ ok: false, error: readError.message }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: safeErrorMessage(readError, "Failed to load document.") },
+      { status: 400 },
+    );
   }
 
   const rowRecord = row as Record<string, unknown> | null;
@@ -63,12 +65,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Document path not found." }, { status: 404 });
   }
 
-  const { error: deleteStorageError } = await supabaseAdmin.storage
+  const { error: deleteStorageError } = await supabase.storage
     .from(IDENTITY_BUCKET)
     .remove([currentPath]);
 
   if (deleteStorageError) {
-    return NextResponse.json({ ok: false, error: deleteStorageError.message }, { status: 400 });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: safeErrorMessage(deleteStorageError, "Failed to delete document file."),
+      },
+      { status: 400 },
+    );
   }
 
   const updatePayload: Record<string, unknown> = { [pathField]: null };
@@ -77,13 +85,16 @@ export async function POST(request: Request) {
     updatePayload[legacyFlag] = false;
   }
 
-  const { error: updateError } = await supabaseAdmin
+  const { error: updateError } = await supabase
     .from("user_identity_documents")
     .update(updatePayload)
     .eq("user_id", userId);
 
   if (updateError) {
-    return NextResponse.json({ ok: false, error: updateError.message }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: safeErrorMessage(updateError, "Failed to clear document path.") },
+      { status: 400 },
+    );
   }
 
   return NextResponse.json({ ok: true });
