@@ -218,10 +218,11 @@ export async function authenticateAdminLogin(
     };
   }
 
-  // 2) Env bootstrap Super Admin (backward compatible)
+  // 2) Env bootstrap Super Admin (requires ADMIN_PASSWORD — no hardcoded default)
   const envUser = getAdminUsername();
   const envPass = getAdminPassword();
   if (
+    envPass != null &&
     safeEqualString(trimmed, envUser) &&
     safeEqualString(password, envPass)
   ) {

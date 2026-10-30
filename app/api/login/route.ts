@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   ADMIN_SESSION_COOKIE,
   ADMIN_SESSION_MAX_AGE_SECONDS,
+  AdminAuthConfigError,
   createAdminSessionValue,
 } from "@/lib/admin-auth";
 import { writeAdminAuditLog, clientMetaFromRequest } from "@/lib/admin-audit";
@@ -63,6 +64,30 @@ export async function POST(request: Request) {
 
   clearLoginRateLimit(rateKey);
 
+  let sessionCookie: string;
+  try {
+    sessionCookie = createAdminSessionValue({
+      adminId: result.sessionFields.adminId,
+      username: result.sessionFields.username,
+      displayName: result.sessionFields.displayName,
+      isSuperAdmin: result.sessionFields.isSuperAdmin,
+    });
+  } catch (error) {
+    void writeAdminAuditLog({
+      actor: result.actor,
+      action: "login_config_error",
+      module: "auth",
+      description: "Admin login aborted: session signing is not configured.",
+      success: false,
+      ...meta,
+    });
+    const message =
+      error instanceof AdminAuthConfigError
+        ? "Server authentication is not configured."
+        : "Unable to complete sign-in.";
+    return NextResponse.json({ ok: false, error: message }, { status: 503 });
+  }
+
   void writeAdminAuditLog({
     actor: result.actor,
     action: "login_success",
@@ -80,21 +105,12 @@ export async function POST(request: Request) {
       isSuperAdmin: result.actor.isSuperAdmin,
     },
   });
-  response.cookies.set(
-    ADMIN_SESSION_COOKIE,
-    createAdminSessionValue({
-      adminId: result.sessionFields.adminId,
-      username: result.sessionFields.username,
-      displayName: result.sessionFields.displayName,
-      isSuperAdmin: result.sessionFields.isSuperAdmin,
-    }),
-    {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: ADMIN_SESSION_MAX_AGE_SECONDS,
-    },
-  );
+  response.cookies.set(ADMIN_SESSION_COOKIE, sessionCookie, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: ADMIN_SESSION_MAX_AGE_SECONDS,
+  });
   return response;
 }
