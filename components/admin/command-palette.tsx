@@ -18,6 +18,7 @@ const COMMANDS: CommandItem[] = [
   { id: "exchanges", label: "Go to Exchanges", href: "/dashboard?tab=exchanges", group: "Navigate" },
   { id: "pending", label: "Go to Pending Verification", href: "/dashboard?tab=pending", group: "Navigate" },
   { id: "car-verification", label: "Go to Car Verification", href: "/dashboard?tab=car-verification", group: "Navigate" },
+  { id: "member-verification", label: "Go to Member Verification", href: "/dashboard?tab=member-verification", group: "Navigate" },
   { id: "fraud-reports", label: "Go to Fraud Reports", href: "/dashboard?tab=fraud-reports", group: "Navigate" },
   { id: "profile-changes", label: "Go to Profile Changes", href: "/dashboard?tab=profile-changes", group: "Navigate" },
   { id: "priority-settings", label: "Go to Priority Timeline", href: "/dashboard?tab=priority-settings", group: "Navigate" },

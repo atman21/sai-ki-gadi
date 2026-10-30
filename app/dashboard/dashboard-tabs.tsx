@@ -38,6 +38,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { AdminNavIcon } from "./admin-nav-icons";
 import { AboutUsAdminPanel } from "./components/about-us-admin-panel";
+import { MemberVerificationPanel } from "./components/member-verification-panel";
 import { InAppAnnouncementsAdminPanel } from "./components/in-app-announcements-admin-panel";
 import { getManualGoldDowngradeBlockReason } from "@/lib/admin-membership-status";
 import { MembershipManagementPanel } from "./components/membership-management-panel";
@@ -429,6 +430,7 @@ type TabKey =
   | "active-fare-overrides"
   | "about-us"
   | "in-app-popups"
+  | "member-verification"
   | "wallet-management"
   | "membership-management"
   | "admin-users"
@@ -456,6 +458,7 @@ const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "active-fare-overrides",
   "about-us",
   "in-app-popups",
+  "member-verification",
   "wallet-management",
   "membership-management",
   "admin-users",
@@ -607,6 +610,7 @@ export function DashboardTabs({
       const params = new URLSearchParams(searchParams.toString());
       if (key === "overview") params.delete("tab");
       else params.set("tab", key);
+      if (key !== "member-verification") params.delete("member");
       const qs = params.toString();
       router.replace(qs ? `/dashboard?${qs}` : "/dashboard", { scroll: false });
     },
@@ -2005,6 +2009,10 @@ export function DashboardTabs({
             label: "Car Verification",
             count: pendingVehicleCount,
             highlightIfCountAboveZero: true,
+          },
+          {
+            key: "member-verification" as TabKey,
+            label: "Member Verification",
           },
           {
             key: "profile-changes" as TabKey,
@@ -6006,6 +6014,8 @@ export function DashboardTabs({
           <AdminRolesPanel />
         ) : activeTab === "audit-logs" ? (
           <AuditLogsPanel />
+        ) : activeTab === "member-verification" ? (
+          <MemberVerificationPanel />
         ) : activeTab === "about-us" ? (
           <AboutUsAdminPanel />
         ) : activeTab === "wallet-management" ? (

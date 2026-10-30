@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import {
+  getNotificationPollState,
+  NOTIFICATION_POLL_INTERVAL_MS,
+  setNotificationPollState,
+} from "@/lib/notification-poll";
 
 export type AdminNotification = {
   id: string;
@@ -49,18 +53,22 @@ export function AdminNotificationsBell() {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<"unread" | "all">("all");
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
   const hydratedRef = useRef(false);
+  const inFlightRef = useRef(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
-  const unreadCount = notifications.filter((n) => !n.is_read).length;
   const visible = notifications.filter((n) =>
     filter === "unread" ? !n.is_read : true,
   );
 
   const loadNotifications = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const res = await fetch("/api/admin/notifications", {
         method: "GET",
@@ -69,71 +77,73 @@ export function AdminNotificationsBell() {
       const payload = (await res.json()) as {
         ok?: boolean;
         notifications?: AdminNotification[];
+        unreadCount?: number;
       };
       if (!res.ok || !payload.ok || !payload.notifications) {
+        setLoadError(true);
+        setNotificationPollState({
+          status: "offline",
+          lastSuccessAt: getNotificationPollState().lastSuccessAt,
+        });
         return;
       }
-      setNotifications(payload.notifications);
-      for (const n of payload.notifications) {
-        seenIdsRef.current.add(n.id);
+
+      const next = payload.notifications;
+      if (hydratedRef.current) {
+        const fresh = next.filter((n) => !seenIdsRef.current.has(n.id));
+        const newest = fresh[0];
+        if (newest) {
+          setToast({
+            id: newest.id,
+            title: newest.title,
+            message: newest.message,
+          });
+          playNotificationSound();
+        }
       }
+      for (const n of next) seenIdsRef.current.add(n.id);
       hydratedRef.current = true;
+      setNotifications(next);
+      setUnreadCount(
+        typeof payload.unreadCount === "number"
+          ? payload.unreadCount
+          : next.filter((n) => !n.is_read).length,
+      );
+      setLoadError(false);
+      setNotificationPollState({
+        status: "live",
+        lastSuccessAt: new Date().toLocaleTimeString(),
+      });
     } catch {
-      // Keep previous list.
+      setLoadError(true);
+      setNotificationPollState({
+        status: "offline",
+        lastSuccessAt: getNotificationPollState().lastSuccessAt,
+      });
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadNotifications();
+    let cancelled = false;
+    const tick = () => {
+      if (!cancelled) void loadNotifications();
+    };
+    tick();
+    const timer = window.setInterval(tick, NOTIFICATION_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      setNotificationPollState({ status: "offline", lastSuccessAt: null });
+    };
   }, [loadNotifications]);
 
   useEffect(() => {
-    const client = getSupabaseBrowserClient();
-    if (!client) return;
-
-    const channel = client
-      .channel("admin-notifications")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "admin_notifications",
-        },
-        (payload) => {
-          const row = payload.new as AdminNotification;
-          if (!row?.id) return;
-          if (seenIdsRef.current.has(row.id)) return;
-          seenIdsRef.current.add(row.id);
-
-          setNotifications((prev) => {
-            if (prev.some((n) => n.id === row.id)) return prev;
-            return [row, ...prev].slice(0, 50);
-          });
-
-          if (hydratedRef.current) {
-            setToast({
-              id: row.id,
-              title: row.title,
-              message: row.message,
-            });
-            playNotificationSound();
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void client.removeChannel(channel);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 5500);
-    return () => clearTimeout(timer);
+    const timer = window.setTimeout(() => setToast(null), 5500);
+    return () => window.clearTimeout(timer);
   }, [toast]);
 
   useEffect(() => {
@@ -158,7 +168,10 @@ export function AdminNotificationsBell() {
         ),
       });
       const payload = (await res.json()) as { ok?: boolean };
-      if (!res.ok || !payload.ok) return;
+      if (!res.ok || !payload.ok) {
+        setLoadError(true);
+        return;
+      }
 
       setNotifications((prev) =>
         prev.map((n) => {
@@ -167,8 +180,41 @@ export function AdminNotificationsBell() {
           return n;
         }),
       );
+      setUnreadCount((count) => {
+        if (markAllRead) return 0;
+        const marked = notifications.filter(
+          (n) => !n.is_read && ids?.includes(n.id),
+        ).length;
+        return Math.max(0, count - marked);
+      });
+      setLoadError(false);
     } catch {
-      // Ignore.
+      setLoadError(true);
+    }
+  };
+
+  const deleteNotification = async (id: string) => {
+    const confirmed = window.confirm("Delete this notification?");
+    if (!confirmed) return;
+    try {
+      const res = await fetch("/api/admin/notifications", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const payload = (await res.json()) as { ok?: boolean };
+      if (!res.ok || !payload.ok) {
+        setLoadError(true);
+        return;
+      }
+      const removed = notifications.find((n) => n.id === id);
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+      if (removed && !removed.is_read) {
+        setUnreadCount((count) => Math.max(0, count - 1));
+      }
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
     }
   };
 
@@ -231,6 +277,11 @@ export function AdminNotificationsBell() {
               </button>
             ))}
           </div>
+          {loadError ? (
+            <p className="border-b border-[var(--admin-border)] bg-[var(--admin-danger-soft)] px-4 py-2 text-xs text-[var(--admin-danger)]">
+              Notifications are temporarily unavailable. Retrying shortly.
+            </p>
+          ) : null}
           <div className="max-h-80 overflow-y-auto">
             {loading ? (
               <div className="space-y-2 p-4">
@@ -248,37 +299,49 @@ export function AdminNotificationsBell() {
               <ul>
                 {visible.map((n) => (
                   <li key={n.id} className="border-b border-[var(--admin-border)] last:border-0">
-                    <button
-                      type="button"
-                      className={`w-full px-4 py-3 text-left transition hover:bg-[var(--admin-surface-hover)] ${
+                    <div
+                      className={`flex items-start gap-2 px-4 py-3 ${
                         n.is_read ? "bg-white" : "bg-[var(--admin-accent-soft)]/50"
                       }`}
-                      onClick={() => {
-                        if (!n.is_read) void markRead([n.id]);
-                      }}
                     >
-                      <div className="flex items-start gap-2.5">
-                        <span
-                          className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                            n.is_read
-                              ? "bg-[var(--admin-border-strong)]"
-                              : "bg-[var(--admin-accent)]"
-                          }`}
-                          aria-hidden
-                        />
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-[var(--admin-text)]">
-                            {n.title}
-                          </p>
-                          <p className="mt-0.5 text-sm text-[var(--admin-text-secondary)]">
-                            {n.message}
-                          </p>
-                          <p className="admin-meta mt-1">
-                            {formatRelative(n.created_at)}
-                          </p>
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => {
+                          if (!n.is_read) void markRead([n.id]);
+                        }}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <span
+                            className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+                              n.is_read
+                                ? "bg-[var(--admin-border-strong)]"
+                                : "bg-[var(--admin-accent)]"
+                            }`}
+                            aria-hidden
+                          />
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-[var(--admin-text)]">
+                              {n.title}
+                            </p>
+                            <p className="mt-0.5 text-sm text-[var(--admin-text-secondary)]">
+                              {n.message}
+                            </p>
+                            <p className="admin-meta mt-1">
+                              {formatRelative(n.created_at)}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs font-semibold text-[var(--admin-text-muted)] hover:text-[var(--admin-danger)]"
+                        aria-label={`Delete notification ${n.title}`}
+                        onClick={() => void deleteNotification(n.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

@@ -21,6 +21,7 @@ export type AdminNavTabKey =
   | "active-fare-overrides"
   | "about-us"
   | "in-app-popups"
+  | "member-verification"
   | "wallet-management"
   | "membership-management"
   | "admin-users"
@@ -182,6 +183,16 @@ const NAV_ICON_CONFIG: Record<AdminNavTabKey, NavIconConfig> = {
       <NavSvg className="h-4 w-4">
         <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
         <path d="M12 18h.01" />
+      </NavSvg>
+    ),
+  },
+  "member-verification": {
+    bgClass: "bg-amber-100",
+    colorClass: "text-amber-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+        <path d="m9 12 2 2 4-4" />
       </NavSvg>
     ),
   },

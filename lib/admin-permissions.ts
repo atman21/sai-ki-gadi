@@ -68,6 +68,7 @@ export const TAB_PERMISSION_MAP: Record<string, AdminPermission> = {
   "wallet-management": "members.wallet",
   "membership-management": "members.membership",
   "car-verification": "vehicles.view",
+  "member-verification": "members.view",
   "profile-changes": "profile_changes.view",
   requirements: "requirements.view",
   exchanges: "exchanges.view",
