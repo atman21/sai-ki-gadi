@@ -7,12 +7,14 @@ import {
     adminUserFullName,
     normalizeAdminUserDetail,
 } from "@/app/dashboard/components/admin-user-profile-sections";
+import {
+  IDENTITY_DOCUMENTS_BUCKET,
+  ownedIdentityPathForSigning,
+} from "@/lib/admin-identity-documents";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 import { DocumentManager } from "./document-manager";
 import { VerificationActions } from "./verification-actions";
-
-const IDENTITY_BUCKET = "identity-documents";
 
 type IdentityDocRow = {
   user_id: string;
@@ -33,12 +35,29 @@ type DocumentItem = {
   signedUrl: string | null;
 };
 
-async function createSignedUrl(path: string): Promise<string | null> {
+async function createOwnedSignedUrl(
+  path: string | null,
+  authUserId: string | null,
+): Promise<string | null> {
+  const owned = ownedIdentityPathForSigning(path, authUserId);
+  if (!owned.ok) return null;
   const { data, error } = await supabaseAdmin.storage
-    .from(IDENTITY_BUCKET)
-    .createSignedUrl(path, 3600);
+    .from(IDENTITY_DOCUMENTS_BUCKET)
+    .createSignedUrl(owned.path, 3600);
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
+}
+
+async function fetchAuthUserId(profileUserId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("auth_user_id")
+    .eq("id", profileUserId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const authUserId =
+    typeof data.auth_user_id === "string" ? data.auth_user_id.trim() : "";
+  return authUserId || null;
 }
 
 async function fetchAdminUser(userId: string) {
@@ -79,7 +98,7 @@ export default async function VerificationUserPage({
 }) {
   const { userId } = await params;
 
-  const [user, docsResult] = await Promise.all([
+  const [user, docsResult, authUserId] = await Promise.all([
     fetchAdminUser(userId),
     (async () => {
       const modern = await supabaseAdmin
@@ -98,6 +117,7 @@ export default async function VerificationUserPage({
         .eq("user_id", userId)
         .maybeSingle<IdentityDocRow>();
     })(),
+    fetchAuthUserId(userId),
   ]);
 
   if (!user) {
@@ -154,7 +174,7 @@ export default async function VerificationUserPage({
   const documents: DocumentItem[] = await Promise.all(
     baseDocs.map(async (doc) => ({
       ...doc,
-      signedUrl: doc.path ? await createSignedUrl(doc.path) : null,
+      signedUrl: await createOwnedSignedUrl(doc.path, authUserId),
     })),
   );
 

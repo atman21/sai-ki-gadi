@@ -45,6 +45,37 @@ export async function POST(request: Request) {
 
   const { userId, pathField } = parsed;
 
+  // Storage folders are keyed by Auth UID — never compare against profile users.id.
+  const { data: ownerRow, error: ownerError } = await supabase
+    .from("users")
+    .select("auth_user_id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (ownerError) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: safeErrorMessage(ownerError, "Failed to load user ownership."),
+      },
+      { status: 400 },
+    );
+  }
+
+  const authUserId =
+    typeof ownerRow?.auth_user_id === "string"
+      ? ownerRow.auth_user_id.trim()
+      : "";
+  if (!authUserId) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "User Auth UID is unavailable or invalid.",
+      },
+      { status: 400 },
+    );
+  }
+
   const { data: row, error: readError } = await supabase
     .from("user_identity_documents")
     .select(pathField)
@@ -63,6 +94,7 @@ export async function POST(request: Request) {
 
   const resolved = resolveIdentityDocumentDeleteTarget({
     userId,
+    authUserId,
     pathField,
     row: (row as Record<string, unknown> | null) ?? null,
   });

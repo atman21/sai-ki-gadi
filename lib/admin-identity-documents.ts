@@ -1,12 +1,15 @@
 /**
  * Identity-document helpers for Admin Panel.
  *
- * Ownership model (discovered from this repo):
- * - Paths live in public.user_identity_documents columns.
- * - Storage bucket is always "identity-documents".
- * - Object keys are opaque strings written by the mobile/client app (not built here).
- * - Authoritative ownership is the DB row for user_id + pathField — never a
- *   client-supplied storage path.
+ * Confirmed ownership model (A6/A7):
+ * - public.users.id = application profile ID (user_identity_documents.user_id).
+ * - public.users.auth_user_id = Supabase Auth UID.
+ * - Mobile Storage keys: `{auth.uid()}/{docKey}-{timestamp}.jpg`
+ * - Bucket: identity-documents (private).
+ * - Admin must compare the first path segment to auth_user_id — never users.id.
+ *
+ * Legacy / opaque keys without an Auth-UID folder are rejected (fail closed).
+ * Manual recovery: see LEGACY_IDENTITY_DOCUMENT_RECOVERY below.
  */
 
 import type { AdminActor } from "@/lib/admin-rbac";
@@ -14,6 +17,51 @@ import { actorHasPermission } from "@/lib/admin-rbac";
 import type { AdminPermission } from "@/lib/admin-permissions";
 
 export const IDENTITY_DOCUMENTS_BUCKET = "identity-documents";
+
+/**
+ * Known formats from Admin Web + confirmed mobile convention.
+ * No ownership is guessed for formats that lack an Auth-UID folder.
+ */
+export const KNOWN_IDENTITY_PATH_FORMATS = [
+  {
+    id: "mobile_auth_uid_folder",
+    description:
+      "{auth.uid()}/{docKey}-{timestamp}.jpg — current mobile upload layout",
+    ownership: "first_segment_equals_auth_user_id",
+  },
+  {
+    id: "legacy_column_aadhaar_pan_gst",
+    description:
+      "Legacy DB columns aadhaar_file_path / pan_file_path / gst_file_path may store older keys",
+    ownership: "fail_closed_unless_auth_uid_prefix",
+  },
+  {
+    id: "opaque_or_unprefixed",
+    description:
+      "Keys without a UUID first segment (e.g. uploads/…, bare filenames)",
+    ownership: "rejected",
+  },
+  {
+    id: "profile_id_prefixed",
+    description:
+      "Keys whose first segment is users.id (profile) instead of auth_user_id",
+    ownership: "rejected_must_use_auth_user_id",
+  },
+] as const;
+
+/**
+ * Manual review / recovery for legacy documents (no auto-migration):
+ * 1. Identify the member (users.id) and load users.auth_user_id.
+ * 2. Inspect the stored path on user_identity_documents.
+ * 3. If the first segment ≠ auth_user_id, do not sign or delete via Admin Web.
+ * 4. Have an authorized operator locate the object in the private
+ *    identity-documents bucket and confirm ownership out-of-band.
+ * 5. Optionally re-upload via the mobile app (writes Auth-UID prefix) or
+ *    manually correct the DB path after verified Storage move — outside
+ *    this Admin Web change set.
+ */
+export const LEGACY_IDENTITY_DOCUMENT_RECOVERY =
+  "Fail closed in Admin Web. Review Storage object ownership manually; re-upload via mobile or correct path only after verified Auth-UID ownership.";
 
 export const IDENTITY_PATH_FIELDS = [
   "driving_license_front_path",
@@ -42,7 +90,7 @@ export const IDENTITY_DOCUMENT_MUTATE_PERMISSIONS: readonly AdminPermission[] = 
   "members.reject",
 ];
 
-const USER_ID_RE =
+const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const FORBIDDEN_CLIENT_PATH_KEYS = [
@@ -65,8 +113,13 @@ export function isAllowedIdentityPathField(
   return (IDENTITY_PATH_FIELDS as readonly string[]).includes(value);
 }
 
+export function isValidUuid(value: string): boolean {
+  return UUID_RE.test(value.trim());
+}
+
+/** Profile users.id validator (delete body). Not a Storage owner id. */
 export function isValidMemberUserId(userId: string): boolean {
-  return USER_ID_RE.test(userId.trim());
+  return isValidUuid(userId);
 }
 
 export function actorCanMutateIdentityDocuments(actor: AdminActor): boolean {
@@ -81,7 +134,7 @@ export type ParsedDeleteBody =
 
 /**
  * Parse delete request. Rejects client-supplied storage paths/buckets/URLs.
- * Only userId + pathField (DB column name) are accepted.
+ * Only profile userId + pathField (DB column name) are accepted.
  */
 export function parseIdentityDocumentDeleteBody(
   body: unknown,
@@ -125,7 +178,6 @@ export type StoragePathValidation =
 /**
  * Validate a storage object key loaded from the database.
  * Rejects traversal, absolute URLs, bucket prefixes, and empty/malformed keys.
- * Does not invent a required path layout — this repo does not define one.
  */
 export function validateIdentityStorageObjectPath(
   raw: string,
@@ -154,11 +206,14 @@ export function validateIdentityStorageObjectPath(
   }
 
   const segments = path.split("/");
-  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+  if (
+    segments.some(
+      (segment) => segment === "" || segment === "." || segment === "..",
+    )
+  ) {
     return { ok: false, error: "Invalid document path." };
   }
 
-  // Reject keys that try to name another bucket or absolute storage URL shape.
   const lowerFirst = segments[0]?.toLowerCase() ?? "";
   if (
     lowerFirst === IDENTITY_DOCUMENTS_BUCKET ||
@@ -176,15 +231,30 @@ export function validateIdentityStorageObjectPath(
 }
 
 /**
- * Soft binding: if the first path segment is a UUID, it must equal the member
- * userId. Paths without a UUID prefix remain accepted (layout unknown in-repo).
+ * Require first path segment === target user's auth_user_id (Auth UID).
+ * Opaque paths and profile-id prefixes are rejected.
+ * Never treats users.id as the Storage owner.
  */
-export function assertStoragePathConsistentWithUser(
+export function assertIdentityStoragePathOwnedByAuthUid(
   storagePath: string,
-  userId: string,
+  authUserId: string,
 ): StoragePathValidation {
+  const authUid = authUserId.trim();
+  if (!authUid || !isValidUuid(authUid)) {
+    return {
+      ok: false,
+      error: "User Auth UID is unavailable or invalid.",
+    };
+  }
+
   const first = storagePath.split("/")[0] ?? "";
-  if (USER_ID_RE.test(first) && first.toLowerCase() !== userId.toLowerCase()) {
+  if (!isValidUuid(first)) {
+    return {
+      ok: false,
+      error: "Document path is missing Auth UID ownership prefix.",
+    };
+  }
+  if (first.toLowerCase() !== authUid.toLowerCase()) {
     return {
       ok: false,
       error: "Document path does not belong to this user.",
@@ -193,10 +263,42 @@ export function assertStoragePathConsistentWithUser(
   return { ok: true, path: storagePath };
 }
 
+/**
+ * Gate for Admin signed-URL generation. Never signs unverified paths.
+ */
+export function ownedIdentityPathForSigning(
+  storagePath: string | null | undefined,
+  authUserId: string | null | undefined,
+): StoragePathValidation {
+  if (typeof storagePath !== "string" || !storagePath.trim()) {
+    return { ok: false, error: "Document path not found." };
+  }
+  if (typeof authUserId !== "string" || !authUserId.trim()) {
+    return {
+      ok: false,
+      error: "User Auth UID is unavailable or invalid.",
+    };
+  }
+
+  const pathCheck = validateIdentityStorageObjectPath(storagePath);
+  if (!pathCheck.ok) return pathCheck;
+
+  return assertIdentityStoragePathOwnedByAuthUid(pathCheck.path, authUserId);
+}
+
+/** @deprecated Use assertIdentityStoragePathOwnedByAuthUid — kept name alias for clarity in diffs. */
+export function assertStoragePathConsistentWithUser(
+  storagePath: string,
+  authUserId: string,
+): StoragePathValidation {
+  return assertIdentityStoragePathOwnedByAuthUid(storagePath, authUserId);
+}
+
 export type ResolvedIdentityDeleteTarget =
   | {
       ok: true;
       userId: string;
+      authUserId: string;
       pathField: IdentityPathField;
       storagePath: string;
       legacyFlag: string | null;
@@ -204,15 +306,27 @@ export type ResolvedIdentityDeleteTarget =
   | { ok: false; status: number; error: string };
 
 /**
- * Resolve delete target from an authoritative DB row for the requested user.
- * Never uses a client-supplied storage path.
+ * Resolve delete target from the member's DB row, then prove Storage ownership
+ * via auth_user_id (not profile users.id).
  */
 export function resolveIdentityDocumentDeleteTarget(input: {
   userId: string;
+  authUserId: string | null | undefined;
   pathField: IdentityPathField;
   row: Record<string, unknown> | null;
 }): ResolvedIdentityDeleteTarget {
   const { userId, pathField, row } = input;
+  const authUserId =
+    typeof input.authUserId === "string" ? input.authUserId.trim() : "";
+
+  if (!authUserId || !isValidUuid(authUserId)) {
+    return {
+      ok: false,
+      status: 400,
+      error: "User Auth UID is unavailable or invalid.",
+    };
+  }
+
   if (!row) {
     return { ok: false, status: 404, error: "Document path not found." };
   }
@@ -227,7 +341,10 @@ export function resolveIdentityDocumentDeleteTarget(input: {
     return { ok: false, status: 400, error: pathCheck.error };
   }
 
-  const bindCheck = assertStoragePathConsistentWithUser(pathCheck.path, userId);
+  const bindCheck = assertIdentityStoragePathOwnedByAuthUid(
+    pathCheck.path,
+    authUserId,
+  );
   if (!bindCheck.ok) {
     return { ok: false, status: 400, error: bindCheck.error };
   }
@@ -235,6 +352,7 @@ export function resolveIdentityDocumentDeleteTarget(input: {
   return {
     ok: true,
     userId,
+    authUserId,
     pathField,
     storagePath: pathCheck.path,
     legacyFlag: LEGACY_FLAG_BY_PATH_FIELD[pathField] ?? null,
@@ -252,7 +370,7 @@ export function buildIdentityDocumentClearPayload(
   return payload;
 }
 
-/** Safe audit metadata — never includes object keys that look like signed URLs. */
+/** Safe audit metadata — never includes signed URLs or secrets. */
 export function buildIdentityDocumentDeleteAuditMetadata(input: {
   pathField: IdentityPathField;
   storagePath: string;
@@ -262,7 +380,6 @@ export function buildIdentityDocumentDeleteAuditMetadata(input: {
   return {
     pathField: input.pathField,
     bucket: input.bucket,
-    // Path shape only — not a signed URL; truncate for safety in logs.
     objectKeySuffix:
       segments.length > 0
         ? segments[segments.length - 1]?.slice(0, 80) ?? null

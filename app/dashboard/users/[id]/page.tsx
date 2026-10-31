@@ -14,6 +14,10 @@ import {
   resolveActorFromSession,
 } from "@/lib/admin-rbac";
 import { getAdminSessionPayload } from "@/lib/admin-session";
+import {
+  IDENTITY_DOCUMENTS_BUCKET,
+  ownedIdentityPathForSigning,
+} from "@/lib/admin-identity-documents";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 import { DocumentManager } from "../../../dashboard/verification/[userId]/document-manager";
@@ -46,14 +50,29 @@ type DocumentItem = {
   signedUrl: string | null;
 };
 
-const IDENTITY_BUCKET = "identity-documents";
-
-async function createSignedUrl(path: string): Promise<string | null> {
+async function createOwnedSignedUrl(
+  path: string | null,
+  authUserId: string | null,
+): Promise<string | null> {
+  const owned = ownedIdentityPathForSigning(path, authUserId);
+  if (!owned.ok) return null;
   const { data, error } = await supabaseAdmin.storage
-    .from(IDENTITY_BUCKET)
-    .createSignedUrl(path, 3600);
+    .from(IDENTITY_DOCUMENTS_BUCKET)
+    .createSignedUrl(owned.path, 3600);
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
+}
+
+async function fetchAuthUserId(profileUserId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("auth_user_id")
+    .eq("id", profileUserId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const authUserId =
+    typeof data.auth_user_id === "string" ? data.auth_user_id.trim() : "";
+  return authUserId || null;
 }
 
 async function fetchAdminUser(id: string) {
@@ -95,7 +114,7 @@ export default async function UserDetailPage({
 }) {
   const { id } = await params;
 
-  const [user, docsResult] = await Promise.all([
+  const [user, docsResult, authUserId] = await Promise.all([
     fetchAdminUser(id),
     (async () => {
       const modern = await supabaseAdmin
@@ -114,6 +133,7 @@ export default async function UserDetailPage({
         .eq("user_id", id)
         .maybeSingle<IdentityDocRow>();
     })(),
+    fetchAuthUserId(id),
   ]);
 
   if (!user) notFound();
@@ -165,7 +185,7 @@ export default async function UserDetailPage({
   const documents: DocumentItem[] = await Promise.all(
     baseDocs.map(async (doc) => ({
       ...doc,
-      signedUrl: doc.path ? await createSignedUrl(doc.path) : null,
+      signedUrl: await createOwnedSignedUrl(doc.path, authUserId),
     })),
   );
 
