@@ -72,7 +72,55 @@ function loadTs(rel, requireMap = {}) {
   console.log("STATIC Super Admin receives catalog keys: OK");
 }
 
-// --- UNIT helpers ---
+// --- Client/server module boundary (hotfix: no transitive supabase-admin) ---
+{
+  const importFrom = (mod) =>
+    new RegExp(
+      `(?:import|export)\\s+[\\s\\S]*?from\\s+["']${mod.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`,
+    );
+
+  const display = read("lib/dashboard-listing-fare-display.ts");
+  assert.doesNotMatch(display, importFrom("@/lib/admin-rbac"));
+  assert.doesNotMatch(display, importFrom("@/lib/supabase-admin"));
+  assert.doesNotMatch(display, /from\s+["']node:crypto["']/);
+  assert.doesNotMatch(display, /from\s+["']@\/lib\/admin-/);
+  assert.equal(
+    [...display.matchAll(/^\s*import\s+/gm)].length,
+    0,
+    "display module must have zero import statements",
+  );
+  assert.match(display, /export const HIDDEN_LISTING_FARE_DISPLAY/);
+  assert.match(display, /export function formatListingFareForDisplay/);
+  assert.match(display, /export function formatListingFareForExport/);
+
+  const server = read("lib/dashboard-listing-fare.ts");
+  assert.match(server, /actorCanViewListingFares/);
+  assert.match(server, importFrom("@/lib/admin-rbac"));
+  assert.match(server, /listings\.fare_view/);
+  assert.match(server, /requirementSsrSelect/);
+  assert.match(server, /exchangeSsrSelect/);
+  assert.match(server, /stripListingPrice/);
+  assert.doesNotMatch(server, /export function formatListingFareForDisplay/);
+  assert.doesNotMatch(server, /export function formatListingFareForExport/);
+  assert.doesNotMatch(server, /export const HIDDEN_LISTING_FARE_DISPLAY/);
+
+  const tabs = read("app/dashboard/dashboard-tabs.tsx");
+  assert.match(tabs, importFrom("@/lib/dashboard-listing-fare-display"));
+  assert.doesNotMatch(tabs, importFrom("@/lib/dashboard-listing-fare"));
+  assert.doesNotMatch(tabs, importFrom("@/lib/admin-rbac"));
+  assert.doesNotMatch(tabs, importFrom("@/lib/supabase-admin"));
+
+  const page = read("app/dashboard/page.tsx");
+  assert.match(page, importFrom("@/lib/dashboard-listing-fare"));
+  assert.doesNotMatch(
+    page,
+    importFrom("@/lib/dashboard-listing-fare-display"),
+  );
+
+  console.log("STATIC client/server fare module boundary: OK");
+}
+
+// --- UNIT server helpers ---
 {
   const rbacMock = {
     actorHasPermission(actor, permission) {
@@ -84,7 +132,6 @@ function loadTs(rel, requireMap = {}) {
     "@/lib/admin-rbac": rbacMock,
   });
 
-  assert.equal(helpers.HIDDEN_LISTING_FARE_DISPLAY, "***");
   assert.equal(helpers.actorCanViewListingFares(null), false);
   assert.equal(
     helpers.actorCanViewListingFares({
@@ -137,18 +184,20 @@ function loadTs(rel, requireMap = {}) {
   assert.deepEqual(stripped, [{ id: "1", source_city: "A" }]);
   assert.equal(JSON.stringify(stripped).includes("999"), false);
 
-  assert.equal(
-    helpers.formatListingFareForDisplay(500, false),
-    "***",
-  );
-  assert.equal(
-    helpers.formatListingFareForDisplay(500, true),
-    "₹500",
-  );
-  assert.equal(helpers.formatListingFareForExport(500, false), "***");
-  assert.equal(helpers.formatListingFareForExport(500, true), "500");
+  console.log("UNIT listing fare server helpers: OK");
+}
 
-  console.log("UNIT listing fare helpers: OK");
+// --- UNIT client-safe display helpers ---
+{
+  const display = loadTs("lib/dashboard-listing-fare-display.ts");
+  assert.equal(display.HIDDEN_LISTING_FARE_DISPLAY, "***");
+  assert.equal(display.formatListingFareForDisplay(500, false), "***");
+  assert.equal(display.formatListingFareForDisplay(500, true), "₹500");
+  assert.equal(display.formatListingFareForDisplay(null, true), "-");
+  assert.equal(display.formatListingFareForExport(500, false), "***");
+  assert.equal(display.formatListingFareForExport(500, true), "500");
+  assert.equal(display.formatListingFareForExport("", true), "-");
+  console.log("UNIT listing fare display helpers: OK");
 }
 
 // --- STATIC SSR page ---
@@ -184,11 +233,23 @@ function loadTs(rel, requireMap = {}) {
   console.log("STATIC UI/export fare gate: OK");
 }
 
+// --- Server-only guard retained ---
+{
+  const admin = read("lib/supabase-admin.ts");
+  assert.match(
+    admin,
+    /lib\/supabase-admin\.ts is server-only and must not be imported in the browser/,
+  );
+  assert.match(admin, /typeof window !== ["']undefined["']/);
+  console.log("STATIC supabase-admin server-only guard: OK");
+}
+
 // --- Driver budget untouched ---
 {
   const changedHint = [
     "lib/admin-permissions.ts",
     "lib/dashboard-listing-fare.ts",
+    "lib/dashboard-listing-fare-display.ts",
     "app/dashboard/page.tsx",
     "app/dashboard/dashboard-tabs.tsx",
   ];

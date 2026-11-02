@@ -1,8 +1,13 @@
 import type { AdminActor } from "@/lib/admin-rbac";
 import { actorHasPermission } from "@/lib/admin-rbac";
 
-/** Established hidden-fare display for admins without listings.fare_view. */
-export const HIDDEN_LISTING_FARE_DISPLAY = "***";
+/**
+ * Server-side listing fare authorization + SSR select/strip helpers.
+ *
+ * Display/format helpers live in `lib/dashboard-listing-fare-display.ts`
+ * (client-safe). Do not move formatters back here — Client Components must
+ * not import this module (it pulls admin-rbac → supabase-admin).
+ */
 
 /**
  * Server-side gate for raw listing fare (requirements.price / exchange_listings.price).
@@ -109,22 +114,4 @@ export function stripListingPrice(rows: unknown): Record<string, unknown>[] {
     delete copy.price;
     return copy;
   });
-}
-
-export function formatListingFareForDisplay(
-  price: unknown,
-  canView: boolean,
-): string {
-  if (!canView) return HIDDEN_LISTING_FARE_DISPLAY;
-  if (price == null || String(price).trim() === "") return "-";
-  return `₹${price}`;
-}
-
-export function formatListingFareForExport(
-  price: unknown,
-  canView: boolean,
-): string {
-  if (!canView) return HIDDEN_LISTING_FARE_DISPLAY;
-  if (price != null && String(price).trim() !== "") return String(price);
-  return "-";
 }

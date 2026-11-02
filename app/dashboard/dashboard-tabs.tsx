@@ -42,7 +42,7 @@ import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
 import {
   formatListingFareForDisplay,
   formatListingFareForExport,
-} from "@/lib/dashboard-listing-fare";
+} from "@/lib/dashboard-listing-fare-display";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
