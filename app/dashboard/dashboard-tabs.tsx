@@ -39,6 +39,10 @@ import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
 import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
 import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
+import {
+  formatListingFareForDisplay,
+  formatListingFareForExport,
+} from "@/lib/dashboard-listing-fare";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
@@ -211,7 +215,8 @@ type Requirement = {
   destination_state: string;
   car_type: string;
   trip_type: string;
-  price: string;
+  /** Present only when SSR loaded with listings.fare_view. */
+  price?: string | number | null;
   journey_start_at: string;
   ride_type: string;
   created_at: string;
@@ -253,6 +258,9 @@ type Exchange = {
   created_at: string;
 
   booked: boolean;
+
+  /** Present only when SSR loaded with listings.fare_view. */
+  price?: string | number | null;
 
   users: {
     first_name: string;
@@ -390,6 +398,8 @@ type DashboardTabsProps = {
   users: AppUser[];
   requirements: Requirement[];
   exchanges: Exchange[];
+  /** Server-resolved listings.fare_view (do not rely on client hide alone). */
+  canViewListingFares?: boolean;
   fraudReports: FraudReport[];
   prioritySettings: PrioritySettings;
   luckyDrawNotificationSettings: LuckyDrawNotificationSettings;
@@ -572,6 +582,7 @@ export function DashboardTabs({
   users,
   requirements,
   exchanges,
+  canViewListingFares: canViewListingFaresProp = false,
   fraudReports,
   prioritySettings,
   luckyDrawNotificationSettings,
@@ -595,6 +606,13 @@ export function DashboardTabs({
       adminAccess.me &&
       adminAccess.can("fraud.manage"),
   );
+  // Prefer server SSR gate; once /api/admin/me loads, AND with client permission (never OR).
+  const canViewListingFares =
+    canViewListingFaresProp &&
+    (!adminAccess ||
+      adminAccess.loading ||
+      !adminAccess.me ||
+      adminAccess.can("listings.fare_view"));
   const [activeTab, setActiveTab] = useState<TabKey>(() =>
     parseTabKey(searchParams.get("tab")),
   );
@@ -2466,10 +2484,7 @@ export function DashboardTabs({
           Destination: cellDash(destination),
           "Car Type": cellDash(item.car_type),
           "Trip Type": cellDash(item.trip_type),
-          Fare:
-            item.price != null && String(item.price).trim() !== ""
-              ? item.price
-              : "-",
+          Fare: formatListingFareForExport(item.price, canViewListingFares),
           "Journey Start": item.journey_start_at
             ? formatDateTime(item.journey_start_at)
             : "-",
@@ -4613,7 +4628,10 @@ export function DashboardTabs({
                         </td>
 
                         <td className="px-6 py-4 text-slate-700">
-                          ₹{item.price}
+                          {formatListingFareForDisplay(
+                            item.price,
+                            canViewListingFares,
+                          )}
                         </td>
 
                         <td className="px-6 py-4 text-slate-700">

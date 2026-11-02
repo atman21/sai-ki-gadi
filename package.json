@@ -12,6 +12,7 @@
     "test:admin-audit": "node scripts/verify-admin-audit-helpers.mjs",
     "test:admin-rbac-a13": "node scripts/verify-admin-rbac-a13.mjs",
     "test:admin-rbac-a13-hardening": "node scripts/verify-admin-rbac-a13-hardening.mjs",
+    "test:admin-listing-fare-a18": "node scripts/verify-admin-listing-fare-a18.mjs",
     "test:s0-1-fraud-rbac": "node scripts/verify-fraud-report-security.mjs",
     "test:s0-2-fare-revoke-rbac": "node scripts/verify-s0-2-fare-revoke-rbac.mjs"
   },

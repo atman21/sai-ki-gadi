@@ -3,11 +3,22 @@ import { cookies } from "next/headers";
 import { Suspense } from "react";
 
 import { actorCanViewFraudReports } from "@/lib/dashboard-fraud-ssr";
+import {
+  actorCanViewListingFares,
+  exchangeSsrSelect,
+  requirementSsrSelect,
+  stripListingPrice,
+} from "@/lib/dashboard-listing-fare";
 import { resolveActorFromSession } from "@/lib/admin-rbac";
 import { getAdminSessionPayload } from "@/lib/admin-session";
 import { supabaseAdmin, usingServiceRole, serviceRoleConfigIssue, supabaseProjectHost } from "@/lib/supabase-admin";
 
-import { DashboardTabs, type ProfileChangeRequestRow, type VehicleVerificationRow, type RouteMinimumFareRow } from "./dashboard-tabs";
+import {
+  DashboardTabs,
+  type ProfileChangeRequestRow,
+  type VehicleVerificationRow,
+  type RouteMinimumFareRow,
+} from "./dashboard-tabs";
 
 export const metadata: Metadata = {
   title: "Dashboard | Sai ki Gadi Admin",
@@ -421,6 +432,7 @@ export default async function DashboardPage() {
     ? await resolveActorFromSession(session)
     : null;
   const canViewFraud = actorCanViewFraudReports(dashboardActor);
+  const canViewListingFares = actorCanViewListingFares(dashboardActor);
 
   // Second wave: all independent module datasets in parallel (was sequential).
   const [
@@ -475,42 +487,15 @@ export default async function DashboardPage() {
       .select("id, enabled, send_time, updated_at")
       .eq("id", 1)
       .maybeSingle(),
+    // Explicit columns: omit price unless listings.fare_view (service_role bypasses RLS).
     supabaseAdmin
       .from("requirements")
-      .select(
-        `
-      *,
-      users!requirements_user_id_fkey (
-        first_name,
-        last_name,
-        phone
-      ),
-      assigned_user:users!requirements_assigned_to_user_id_fkey (
-        first_name,
-        last_name,
-        phone
-      )
-    `,
-      )
+      .select(requirementSsrSelect(canViewListingFares))
       .order("created_at", { ascending: false })
       .limit(500),
     supabaseAdmin
       .from("exchange_listings")
-      .select(
-        `
-    *,
-    users!exchange_listings_user_id_fkey (
-      first_name,
-      last_name,
-      phone
-    ),
-    exchanged_user:users!exchange_listings_exchanged_to_user_id_fkey (
-      first_name,
-      last_name,
-      phone
-    )
-  `,
-      )
+      .select(exchangeSsrSelect(canViewListingFares))
       .order("created_at", { ascending: false })
       .limit(500),
     // Do not query fraud_reports unless the actor has fraud.view (SSR props leak otherwise).
@@ -594,8 +579,13 @@ export default async function DashboardPage() {
   const prioritySettingsRow = prioritySettingsResult.data;
   const luckyDrawNotificationSettingsRow = luckyDrawResult.data;
   const birthdayNotificationSettingsRow = birthdayNotifResult.data;
-  const requirements = requirementsResult.data;
-  const exchanges = exchangesResult.data;
+  // Defense-in-depth: never serialize price into client props without permission.
+  const requirements = canViewListingFares
+    ? (requirementsResult.data ?? [])
+    : stripListingPrice(requirementsResult.data);
+  const exchanges = canViewListingFares
+    ? (exchangesResult.data ?? [])
+    : stripListingPrice(exchangesResult.data);
   const fraudReports = canViewFraud ? fraudReportsResult.data : [];
   const profileChangeRequestRows = profileChangeRequestsResult.data;
   const profileChangeRequestsError = profileChangeRequestsResult.error;
@@ -774,8 +764,13 @@ export default async function DashboardPage() {
           cities={cities ?? []}
           sliders={sliders ?? []}
           users={allUsers ?? []}
-          requirements={requirements ?? []}
-          exchanges={exchanges ?? []}
+          requirements={requirements as Parameters<
+            typeof DashboardTabs
+          >[0]["requirements"]}
+          exchanges={exchanges as Parameters<
+            typeof DashboardTabs
+          >[0]["exchanges"]}
+          canViewListingFares={canViewListingFares}
           fraudReports={fraudReports ?? []}
           prioritySettings={prioritySettings}
           luckyDrawNotificationSettings={luckyDrawNotificationSettings}

@@ -1,6 +1,8 @@
 /**
  * Canonical Admin Panel permission keys.
- * Must stay in sync with seeded rows in migration 065.
+ * Must stay in sync with seeded rows in migration 065 (+ later seeds).
+ * `listings.fare_view` also requires a DB seed (see A18-DB fare-masking migration);
+ * Super Admin receives it in-app via allPermissionsSet() / isSuperAdmin bypass.
  */
 
 export const ADMIN_PERMISSIONS = [
@@ -19,6 +21,8 @@ export const ADMIN_PERMISSIONS = [
   "profile_changes.reject",
   "requirements.view",
   "exchanges.view",
+  /** Full raw requirements.price / exchange_listings.price in Admin. */
+  "listings.fare_view",
   "fraud.view",
   "fraud.manage",
   "cities.view",
@@ -125,7 +129,11 @@ export const PERMISSION_MODULES: {
   {
     module: "listings",
     label: "Requirements & Exchanges",
-    permissions: ["requirements.view", "exchanges.view"],
+    permissions: [
+      "requirements.view",
+      "exchanges.view",
+      "listings.fare_view",
+    ],
   },
   {
     module: "fraud",
