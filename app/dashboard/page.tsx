@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Suspense } from "react";
 
+import { actorCanViewFraudReports } from "@/lib/dashboard-fraud-ssr";
+import { resolveActorFromSession } from "@/lib/admin-rbac";
+import { getAdminSessionPayload } from "@/lib/admin-session";
 import { supabaseAdmin, usingServiceRole, serviceRoleConfigIssue, supabaseProjectHost } from "@/lib/supabase-admin";
 
 import { DashboardTabs, type ProfileChangeRequestRow, type VehicleVerificationRow, type RouteMinimumFareRow } from "./dashboard-tabs";
@@ -410,6 +414,14 @@ export default async function DashboardPage() {
     ]),
   );
 
+  // Resolve actor before loading permission-sensitive SSR datasets.
+  const cookieStore = await cookies();
+  const session = getAdminSessionPayload(cookieStore);
+  const dashboardActor = session
+    ? await resolveActorFromSession(session)
+    : null;
+  const canViewFraud = actorCanViewFraudReports(dashboardActor);
+
   // Second wave: all independent module datasets in parallel (was sequential).
   const [
     winnersResult,
@@ -501,10 +513,12 @@ export default async function DashboardPage() {
       )
       .order("created_at", { ascending: false })
       .limit(500),
-    supabaseAdmin
-      .from("fraud_reports")
-      .select(
-        `
+    // Do not query fraud_reports unless the actor has fraud.view (SSR props leak otherwise).
+    canViewFraud
+      ? supabaseAdmin
+          .from("fraud_reports")
+          .select(
+            `
     *,
     from_user:users!fraud_reports_from_user_id_fkey (
       first_name,
@@ -517,9 +531,10 @@ export default async function DashboardPage() {
       phone
     )
   `,
-      )
-      .order("created_at", { ascending: false })
-      .limit(300),
+          )
+          .order("created_at", { ascending: false })
+          .limit(300)
+      : Promise.resolve({ data: [] as never[], error: null }),
     supabaseAdmin
       .from("profile_change_requests")
       .select(
@@ -581,7 +596,7 @@ export default async function DashboardPage() {
   const birthdayNotificationSettingsRow = birthdayNotifResult.data;
   const requirements = requirementsResult.data;
   const exchanges = exchangesResult.data;
-  const fraudReports = fraudReportsResult.data;
+  const fraudReports = canViewFraud ? fraudReportsResult.data : [];
   const profileChangeRequestRows = profileChangeRequestsResult.data;
   const profileChangeRequestsError = profileChangeRequestsResult.error;
   const vehicleRows = vehiclesResult.data;

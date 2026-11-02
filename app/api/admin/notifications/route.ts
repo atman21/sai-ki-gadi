@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
 
 export type AdminNotificationRow = {
   id: string;
@@ -21,27 +14,10 @@ export type AdminNotificationRow = {
 };
 
 export async function GET() {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
 
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
-
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await gate.supabase
     .from("admin_notifications")
     .select("id, type, title, message, user_id, is_read, created_at")
     .order("created_at", { ascending: false })
@@ -49,7 +25,10 @@ export async function GET() {
 
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to load notifications."),
+      },
       { status: 400 },
     );
   }
@@ -107,7 +86,10 @@ export async function PATCH(request: Request) {
       ...clientMetaFromRequest(request),
     });
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to update notifications."),
+      },
       { status: 400 },
     );
   }

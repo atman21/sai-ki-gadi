@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import {
   clientMetaFromRequest,
   recordChange,
@@ -47,7 +47,10 @@ function normalizeVehicleCategory(
 }
 
 export async function PUT(request: Request, context: Context) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("minimum_fares.manage", {
+    request,
+    auditModule: "minimum_fares",
+  });
   if (!gate.ok) return gate.response;
 
   const { id } = await context.params;
@@ -153,7 +156,10 @@ export async function PUT(request: Request, context: Context) {
       );
     }
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to update minimum fare."),
+      },
       { status: 400 },
     );
   }
@@ -180,7 +186,10 @@ export async function PUT(request: Request, context: Context) {
 }
 
 export async function PATCH(request: Request, context: Context) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("minimum_fares.manage", {
+    request,
+    auditModule: "minimum_fares",
+  });
   if (!gate.ok) return gate.response;
 
   const { id } = await context.params;
@@ -225,7 +234,10 @@ export async function PATCH(request: Request, context: Context) {
       ...clientMetaFromRequest(request),
     });
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to update minimum fare."),
+      },
       { status: 400 },
     );
   }
@@ -248,7 +260,10 @@ export async function PATCH(request: Request, context: Context) {
 }
 
 export async function DELETE(request: Request, context: Context) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("minimum_fares.manage", {
+    request,
+    auditModule: "minimum_fares",
+  });
   if (!gate.ok) return gate.response;
 
   const { id } = await context.params;
@@ -280,7 +295,10 @@ export async function DELETE(request: Request, context: Context) {
       ...clientMetaFromRequest(request),
     });
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to delete minimum fare."),
+      },
       { status: 400 },
     );
   }

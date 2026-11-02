@@ -1,33 +1,14 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+import { requireAdminPermission } from "@/lib/admin-api";
 
 /** Lightweight counts for dashboard cards — avoids loading full tables. */
-export async function GET() {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+export async function GET(request: Request) {
+  const gate = await requireAdminPermission("minimum_fares.view", {
+    request,
+    auditModule: "minimum_fares",
+  });
+  if (!gate.ok) return gate.response;
 
   const [
     rulesTotal,
@@ -36,22 +17,22 @@ export async function GET() {
     activeOverrides,
     expiredOverrides,
   ] = await Promise.all([
-    supabaseAdmin
+    gate.supabase
       .from("route_minimum_fares")
       .select("id", { count: "exact", head: true }),
-    supabaseAdmin
+    gate.supabase
       .from("route_minimum_fares")
       .select("id", { count: "exact", head: true })
       .eq("is_active", true),
-    supabaseAdmin
+    gate.supabase
       .from("fare_override_requests")
       .select("id", { count: "exact", head: true })
       .eq("status", "pending"),
-    supabaseAdmin
+    gate.supabase
       .from("user_fare_overrides")
       .select("id", { count: "exact", head: true })
       .eq("status", "approved"),
-    supabaseAdmin
+    gate.supabase
       .from("user_fare_overrides")
       .select("id", { count: "exact", head: true })
       .eq("status", "expired"),

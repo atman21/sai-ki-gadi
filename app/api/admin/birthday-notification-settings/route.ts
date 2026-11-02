@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import {
   clientMetaFromRequest,
   recordChange,
@@ -15,8 +15,18 @@ export type BirthdayNotificationSettings = {
   updated_at: string | null;
 };
 
-async function requireAdmin() {
-  return requireAdminApi();
+async function requireBirthdayView(request?: Request) {
+  return requireAdminPermission("birthday.view", {
+    request,
+    auditModule: "birthday",
+  });
+}
+
+async function requireBirthdayManage(request?: Request) {
+  return requireAdminPermission("birthday.manage", {
+    request,
+    auditModule: "birthday",
+  });
 }
 
 /** Normalize to HH:MM 24h Asia/Kolkata wall time. */
@@ -32,8 +42,8 @@ export function normalizeSendTime(input: unknown): string | null {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-export async function GET() {
-  const auth = await requireAdmin();
+export async function GET(request: Request) {
+  const auth = await requireBirthdayView(request);
   if (!auth.ok) return auth.response;
 
   try {
@@ -45,7 +55,13 @@ export async function GET() {
 
     if (error) {
       return NextResponse.json(
-        { ok: false, error: error.message },
+        {
+          ok: false,
+          error: safeErrorMessage(
+            error,
+            "Unable to load birthday notification settings.",
+          ),
+        },
         { status: 500 },
       );
     }
@@ -75,7 +91,7 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requireBirthdayManage(req);
   if (!auth.ok) return auth.response;
 
   try {
@@ -125,7 +141,13 @@ export async function PUT(req: Request) {
         ...clientMetaFromRequest(req),
       });
       return NextResponse.json(
-        { ok: false, error: error.message },
+        {
+          ok: false,
+          error: safeErrorMessage(
+            error,
+            "Failed to update birthday notification settings.",
+          ),
+        },
         { status: 500 },
       );
     }

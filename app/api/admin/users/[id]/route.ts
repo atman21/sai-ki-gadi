@@ -1,5 +1,12 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import {
+  permissionDeniedResponse,
+  requireAdminApi,
+  requireAdminPermission,
+  safeErrorMessage,
+} from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
+import { actorHasPermission } from "@/lib/admin-rbac";
+import { isAdminUuid } from "@/lib/admin-uuid";
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -17,6 +24,12 @@ export async function PUT(
 
   try {
     const { id } = await context.params;
+    if (!isAdminUuid(id)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid user ID." },
+        { status: 400 },
+      );
+    }
 
     const body = await request.json();
 
@@ -43,7 +56,31 @@ export async function PUT(
       updateData.admin_remarks = admin_remarks;
     }
 
+    const profileFieldsRequested =
+      typeof status === "boolean" ||
+      typeof welcome_completed === "boolean" ||
+      typeof admin_remarks === "string";
+    if (
+      profileFieldsRequested &&
+      !actorHasPermission(__adminGate.actor, "members.edit")
+    ) {
+      return permissionDeniedResponse(__adminGate.actor, "members.edit", {
+        request,
+        auditModule: "members",
+      });
+    }
+
     if (membership_type) {
+      if (!actorHasPermission(__adminGate.actor, "members.membership")) {
+        return permissionDeniedResponse(
+          __adminGate.actor,
+          "members.membership",
+          {
+            request,
+            auditModule: "members",
+          },
+        );
+      }
       if (membership_type !== "gold" && membership_type !== "regular") {
         return NextResponse.json({ error: "Invalid membership type" }, { status: 400 });
       }
@@ -80,7 +117,15 @@ export async function PUT(
           metadata: { membership_type, membership_duration_days: days },
           ...clientMetaFromRequest(request),
         });
-        return NextResponse.json({ error: membershipError.message }, { status: 500 });
+        return NextResponse.json(
+          {
+            error: safeErrorMessage(
+              membershipError,
+              "Failed to update membership.",
+            ),
+          },
+          { status: 500 },
+        );
       }
       membershipAudit = {
         membership_type,
@@ -137,7 +182,7 @@ export async function PUT(
 
       return NextResponse.json(
         {
-          error: error.message,
+          error: safeErrorMessage(error, "Failed to update member."),
         },
         {
           status: 500,
@@ -188,11 +233,20 @@ export async function DELETE(
     }>;
   },
 ) {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("members.edit", {
+    request,
+    auditModule: "members",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {
     const { id } = await context.params;
+    if (!isAdminUuid(id)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid user ID." },
+        { status: 400 },
+      );
+    }
 
     const { data: before } = await supabaseAdmin
       .from("users")
@@ -224,7 +278,8 @@ export async function DELETE(
 
       return NextResponse.json(
         {
-          error: error.message,
+          ok: false,
+          error: safeErrorMessage(error, "Failed to delete member."),
         },
         {
           status: 500,

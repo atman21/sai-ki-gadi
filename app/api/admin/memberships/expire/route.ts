@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
 /**
@@ -8,7 +8,10 @@ import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin
  * Does not change account ON/OFF status — only membership fields / history.
  */
 export async function POST(request: Request) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("members.membership", {
+    request,
+    auditModule: "members",
+  });
   if (!gate.ok) return gate.response;
 
   const { data, error } = await gate.supabase.rpc("admin_expire_memberships");
@@ -20,7 +23,7 @@ export async function POST(request: Request) {
       module: "members",
       description: "Bulk membership expiry failed",
       resourceType: "membership",
-      reason: safeErrorMessage(error, "Unable to expire memberships."),
+      reason: error.message,
       ...clientMetaFromRequest(request),
     });
     return NextResponse.json(

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminPermission } from "@/lib/admin-api";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import { writeAdminAuditLog, clientMetaFromRequest } from "@/lib/admin-audit";
 
 type Body = {
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
 
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message },
+      { ok: false, error: safeErrorMessage(error, "Unable to approve fare override request.") },
       { status: 400 },
     );
   }

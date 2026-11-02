@@ -589,6 +589,12 @@ export function DashboardTabs({
   const router = useRouter();
   const searchParams = useSearchParams();
   const adminAccess = useAdminAccessOptional();
+  const canManageFraud = Boolean(
+    adminAccess &&
+      !adminAccess.loading &&
+      adminAccess.me &&
+      adminAccess.can("fraud.manage"),
+  );
   const [activeTab, setActiveTab] = useState<TabKey>(() =>
     parseTabKey(searchParams.get("tab")),
   );
@@ -4851,21 +4857,23 @@ export function DashboardTabs({
         </>
       ) : activeTab === "fraud-reports" ? (
         <>
-          <div className="mb-4 flex justify-end">
-            <button
-              onClick={() => {
-                setEditingFraudId(null);
-                setFromUserId("");
-                setToUserId("");
-                setFraudReason("");
-                setFraudDescription("");
-                setShowFraudModal(true);
-              }}
-              className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-            >
-              Report Fraud
-            </button>
-          </div>
+          {canManageFraud ? (
+            <div className="mb-4 flex justify-end">
+              <button
+                onClick={() => {
+                  setEditingFraudId(null);
+                  setFromUserId("");
+                  setToUserId("");
+                  setFraudReason("");
+                  setFraudDescription("");
+                  setShowFraudModal(true);
+                }}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                Report Fraud
+              </button>
+            </div>
+          ) : null}
 
           <div className="admin-table-wrap">
             <div className="overflow-x-auto">
@@ -4927,31 +4935,35 @@ export function DashboardTabs({
                         </td>
 
                         <td className="px-6 py-4">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => {
-                                setEditingFraudId(item.id);
+                          {canManageFraud ? (
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => {
+                                  setEditingFraudId(item.id);
 
-                                setFromUserId(item.from_user_id);
-                                setToUserId(item.to_user_id);
+                                  setFromUserId(item.from_user_id);
+                                  setToUserId(item.to_user_id);
 
-                                setFraudReason(item.reason);
-                                setFraudDescription(item.description || "");
+                                  setFraudReason(item.reason);
+                                  setFraudDescription(item.description || "");
 
-                                setShowFraudModal(true);
-                              }}
-                              className="rounded bg-amber-100 px-3 py-1 text-amber-700"
-                            >
-                              Edit
-                            </button>
+                                  setShowFraudModal(true);
+                                }}
+                                className="rounded bg-amber-100 px-3 py-1 text-amber-700"
+                              >
+                                Edit
+                              </button>
 
-                            <button
-                              onClick={() => deleteFraud(item.id)}
-                              className="rounded bg-red-100 px-3 py-1 text-red-700"
-                            >
-                              Delete
-                            </button>
-                          </div>
+                              <button
+                                onClick={() => deleteFraud(item.id)}
+                                className="rounded bg-red-100 px-3 py-1 text-red-700"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                       </tr>
                     ))

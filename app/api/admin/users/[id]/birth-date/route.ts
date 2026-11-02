@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordChange, recordFailure } from "@/lib/admin-audit";
+import { isAdminUuid } from "@/lib/admin-uuid";
 
 function validDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -12,11 +13,16 @@ function validDate(value: unknown): value is string {
 }
 
 export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("members.edit", {
+    request: req,
+    auditModule: "members",
+  });
   if (!gate.ok) return gate.response;
   const supabaseAdmin = gate.supabase;
   const { id } = await ctx.params;
-  if (!/^[a-f0-9]{8}-[a-f0-9-]{27,}$/i.test(id)) return NextResponse.json({ ok: false, error: "Invalid user ID" }, { status: 400 });
+  if (!isAdminUuid(id)) {
+    return NextResponse.json({ ok: false, error: "Invalid user ID" }, { status: 400 });
+  }
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 }); }
   if (!validDate(body.birth_date)) return NextResponse.json({ ok: false, error: "Choose a valid date of birth" }, { status: 400 });
@@ -34,7 +40,10 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
       reason: error.message,
       ...clientMetaFromRequest(req),
     });
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: safeErrorMessage(error, "Failed to update birth date.") },
+      { status: 500 },
+    );
   }
   if (!data) return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
   void recordChange({

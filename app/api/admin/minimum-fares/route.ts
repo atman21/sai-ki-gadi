@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
 import { normalizeIndianStateName } from "@/lib/normalize-indian-state";
 import {
   isVehicleCategory,
@@ -104,24 +97,11 @@ function validateBody(body: Body):
 }
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminPermission("minimum_fares.view", {
+    request,
+    auditModule: "minimum_fares",
+  });
+  if (!gate.ok) return gate.response;
 
   const { searchParams } = new URL(request.url);
   const q = (searchParams.get("q") ?? "").trim();
@@ -135,7 +115,7 @@ export async function GET(request: Request) {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  let query = supabaseAdmin
+  let query = gate.supabase
     .from("route_minimum_fares")
     .select(
       "id, from_city, from_state, to_city, to_state, vehicle_category, minimum_fare, is_active, created_at, updated_at",
@@ -158,7 +138,10 @@ export async function GET(request: Request) {
   const { data, error, count } = await query;
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to load minimum fares."),
+      },
       { status: 400 },
     );
   }
@@ -173,7 +156,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("minimum_fares.manage", {
+    request,
+    auditModule: "minimum_fares",
+  });
   if (!gate.ok) return gate.response;
 
   const body = (await request.json().catch(() => ({}))) as Body;
@@ -228,7 +214,10 @@ export async function POST(request: Request) {
       );
     }
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to create minimum fare."),
+      },
       { status: 400 },
     );
   }

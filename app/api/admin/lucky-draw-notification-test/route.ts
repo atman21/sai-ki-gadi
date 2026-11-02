@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import {
   clientMetaFromRequest,
   recordFailure,
@@ -28,7 +28,10 @@ function summarizeProviderPayload(payload: unknown): Record<string, unknown> {
  * Never exposes the service-role key to the browser.
  */
 export async function POST(request: Request) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("lucky_draw.manage", {
+    request,
+    auditModule: "lucky_draw",
+  });
   if (!gate.ok) return gate.response;
 
   const auditBase = {

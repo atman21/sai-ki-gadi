@@ -1,12 +1,6 @@
-import { cookies } from "next/headers";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import { NextResponse } from "next/server";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
 
 function getKolkataParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -62,26 +56,13 @@ function formatAmPm(hhmm: string): string {
 /**
  * Real status for Birthday Notifications admin card (no fake metrics).
  */
-export async function GET() {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+export async function GET(request: Request) {
+  const gate = await requireAdminPermission("birthday.view", {
+    request,
+    auditModule: "birthday",
+  });
+  if (!gate.ok) return gate.response;
+  const supabaseAdmin = gate.supabase;
 
   try {
     const { dateKey, hhmm, minutes } = getKolkataParts();
@@ -105,7 +86,13 @@ export async function GET() {
 
     if (settingsRes.error) {
       return NextResponse.json(
-        { ok: false, error: settingsRes.error.message },
+        {
+          ok: false,
+          error: safeErrorMessage(
+            settingsRes.error,
+            "Unable to load birthday notification status.",
+          ),
+        },
         { status: 500 },
       );
     }
@@ -146,8 +133,12 @@ export async function GET() {
       nextCheckLabel: formatAmPm(nextCheckHhmm),
       settings: settingsRes.data ?? null,
       todayBirthdayCount,
-      birthdayUsersError: birthdayUsersRes.error?.message ?? null,
-      logsError: logsRes.error?.message ?? null,
+      birthdayUsersError: birthdayUsersRes.error
+        ? "Unable to load today's birthday users."
+        : null,
+      logsError: logsRes.error
+        ? "Unable to load birthday notification logs."
+        : null,
       processed: {
         success: successCount,
         failure: failureCount,

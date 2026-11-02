@@ -9,7 +9,11 @@
     "lint": "eslint",
     "test:admin-helpers": "node scripts/verify-admin-feature-helpers.mjs",
     "test:phone-actions": "node scripts/verify-phone-actions.mjs",
-    "test:admin-audit": "node scripts/verify-admin-audit-helpers.mjs"
+    "test:admin-audit": "node scripts/verify-admin-audit-helpers.mjs",
+    "test:admin-rbac-a13": "node scripts/verify-admin-rbac-a13.mjs",
+    "test:admin-rbac-a13-hardening": "node scripts/verify-admin-rbac-a13-hardening.mjs",
+    "test:s0-1-fraud-rbac": "node scripts/verify-fraud-report-security.mjs",
+    "test:s0-2-fare-revoke-rbac": "node scripts/verify-s0-2-fare-revoke-rbac.mjs"
   },
   "dependencies": {
     "@google-cloud/text-to-speech": "^6.4.1",
