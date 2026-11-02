@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
+import {
+  permissionDeniedResponse,
+  requireAdminApi,
+  safeErrorMessage,
+} from "@/lib/admin-api";
+import { actorHasPermission } from "@/lib/admin-rbac";
 
 function escapeIlike(value: string): string {
   return value.replace(/[%_,\\]/g, "");
@@ -37,6 +42,18 @@ function buildSearchOr(q: string): string {
 export async function GET(request: Request) {
   const gate = await requireAdminApi();
   if (!gate.ok) return gate.response;
+
+  // Used by Wallet + Membership management (and members.view list workflows).
+  const canSearch =
+    actorHasPermission(gate.actor, "members.view") ||
+    actorHasPermission(gate.actor, "members.wallet") ||
+    actorHasPermission(gate.actor, "members.membership");
+  if (!canSearch) {
+    return permissionDeniedResponse(gate.actor, "members.view", {
+      request,
+      auditModule: "members",
+    });
+  }
 
   const { searchParams } = new URL(request.url);
   const q = (searchParams.get("q") ?? "").trim();

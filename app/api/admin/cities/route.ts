@@ -1,11 +1,14 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function POST(req: Request) {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("cities.manage", {
+    request: req,
+    auditModule: "cities",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {

@@ -2,6 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
+
 type WalletTransaction = {
   id: string;
   transaction_type: "credit" | "debit";
@@ -91,6 +93,11 @@ function newIdempotencyKey() {
 }
 
 export function AdminWalletPanel({ userId }: { userId: string }) {
+  const adminAccess = useAdminAccessOptional();
+  const deniedWallet =
+    Boolean(adminAccess && !adminAccess.loading && adminAccess.me) &&
+    !adminAccess!.can("members.wallet");
+
   const [balance, setBalance] = useState<number | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,6 +118,12 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
   const expiryAllowed = prizeCredit;
 
   const loadWallet = useCallback(async () => {
+    if (deniedWallet) {
+      setLoading(false);
+      setBalance(null);
+      setTransactions([]);
+      return;
+    }
     setError(null);
     try {
       const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/wallet`, {
@@ -127,7 +140,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, deniedWallet]);
 
   useEffect(() => {
     void loadWallet();
@@ -274,6 +287,10 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
     } finally {
       setPosting(false);
     }
+  }
+
+  if (deniedWallet) {
+    return null;
   }
 
   return (

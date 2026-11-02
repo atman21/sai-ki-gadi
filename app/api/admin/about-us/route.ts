@@ -1,4 +1,4 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordChange, recordFailure } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
 
@@ -35,7 +35,10 @@ function normalizeText(value: unknown): string {
 }
 
 export async function GET(req: Request) {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("about.view", {
+    request: req,
+    auditModule: "about",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {
@@ -82,7 +85,10 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("about.manage", {
+    request: req,
+    auditModule: "about",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {

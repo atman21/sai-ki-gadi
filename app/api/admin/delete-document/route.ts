@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import {
   clientMetaFromRequest,
   recordFailure,
@@ -37,7 +37,10 @@ function isAllowedPathField(value: string): value is AllowedPathField {
 }
 
 export async function POST(request: Request) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("members.edit", {
+    request,
+    auditModule: "members",
+  });
   if (!gate.ok) return gate.response;
   const supabaseAdmin = gate.supabase;
 

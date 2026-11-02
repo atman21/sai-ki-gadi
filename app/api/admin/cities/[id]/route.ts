@@ -1,4 +1,4 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
 
@@ -10,7 +10,10 @@ export async function DELETE(
     params: Promise<{ id: string }>;
   },
 ) {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("cities.manage", {
+    request,
+    auditModule: "cities",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {

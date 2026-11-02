@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
-  const gate = await requireAdminApi();
+export async function GET(req: Request, context: { params: Promise<{ id: string }> }) {
+  const gate = await requireAdminPermission("members.membership", {
+    request: req,
+    auditModule: "membership",
+  });
   if (!gate.ok) return gate.response;
   const { id } = await context.params;
   const { data, error } = await supabaseAdmin.from("membership_history")

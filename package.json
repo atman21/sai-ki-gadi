@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "npm run test:admin-helpers && npm run test:phone-actions && npm run test:admin-audit && npm run test:admin-rbac-a13 && npm run test:admin-rbac-a13-hardening && npm run test:admin-listing-fare-a18 && npm run test:admin-lucky-draw-rbac-a19 && npm run test:admin-lucky-draw-prize-lots-a19 && npm run test:admin-dashboard-a21 && npm run test:s0-1-fraud-rbac && npm run test:s0-2-fare-revoke-rbac",
     "test:admin-helpers": "node scripts/verify-admin-feature-helpers.mjs",
     "test:phone-actions": "node scripts/verify-phone-actions.mjs",
     "test:admin-audit": "node scripts/verify-admin-audit-helpers.mjs",
@@ -15,6 +16,7 @@
     "test:admin-listing-fare-a18": "node scripts/verify-admin-listing-fare-a18.mjs",
     "test:admin-lucky-draw-rbac-a19": "node scripts/verify-admin-lucky-draw-rbac-a19.mjs",
     "test:admin-lucky-draw-prize-lots-a19": "node scripts/verify-admin-lucky-draw-prize-lots-a19.mjs",
+    "test:admin-dashboard-a21": "node scripts/verify-admin-dashboard-a21.mjs",
     "test:s0-1-fraud-rbac": "node scripts/verify-fraud-report-security.mjs",
     "test:s0-2-fare-revoke-rbac": "node scripts/verify-s0-2-fare-revoke-rbac.mjs"
   },

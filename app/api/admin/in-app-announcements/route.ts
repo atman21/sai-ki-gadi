@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import {
-  requireAdminApi,
+  requireAdminPermission,
   safeErrorMessage,
 } from "@/lib/in-app-announcements/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
@@ -11,7 +11,10 @@ import {
 } from "@/lib/in-app-announcements/types";
 
 export async function GET(request: Request) {
-  const auth = await requireAdminApi();
+  const auth = await requireAdminPermission("announcements.view", {
+    request,
+    auditModule: "announcements",
+  });
   if (!auth.ok) return auth.response;
 
   const { searchParams } = new URL(request.url);
@@ -50,7 +53,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAdminApi();
+  const auth = await requireAdminPermission("announcements.manage", {
+    request,
+    auditModule: "announcements",
+  });
   if (!auth.ok) return auth.response;
 
   try {

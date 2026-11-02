@@ -527,6 +527,7 @@ type BirthdaySortKey = "dob_oldest" | "dob_newest";
 type BirthdayPresetFilter = "all" | "today" | "this_month" | "not_set";
 
 const BIRTHDAY_PAGE_SIZE = 50;
+const USERS_PAGE_SIZE = 50;
 
 /** Parse signup DOB (`users.birth_date`) as a local calendar date for sorting/filters. */
 function parseBirthDateValue(value: string | null | undefined): Date | null {
@@ -716,6 +717,7 @@ export function DashboardTabs({
   const [birthdaySort, setBirthdaySort] =
     useState<BirthdaySortKey>("dob_oldest");
   const [birthdayPage, setBirthdayPage] = useState(1);
+  const [usersPage, setUsersPage] = useState(1);
   const [remarksDrafts, setRemarksDrafts] = useState<Record<string, string>>(
     {},
   );
@@ -784,6 +786,7 @@ export function DashboardTabs({
     setLiveFareStats(fareStats);
   }, [fareStats]);
 
+  // Mount-once refresh; SSR already provides fareStats. Avoid refetch on every tab change.
   useEffect(() => {
     let cancelled = false;
     const refreshStats = async () => {
@@ -804,7 +807,7 @@ export function DashboardTabs({
     return () => {
       cancelled = true;
     };
-  }, [activeTab]);
+  }, []);
 
   // Realtime pending fare request count
   useEffect(() => {
@@ -1452,6 +1455,28 @@ export function DashboardTabs({
     });
   }, [
     users,
+    userSearch,
+    userMembership,
+    userVerification,
+    userStatusFilter,
+    userFromDate,
+    userToDate,
+    userSort,
+  ]);
+
+  const usersTotalPages = Math.max(
+    1,
+    Math.ceil(filteredUsers.length / USERS_PAGE_SIZE),
+  );
+  const usersPageSafe = Math.min(usersPage, usersTotalPages);
+  const paginatedUsers = useMemo(() => {
+    const start = (usersPageSafe - 1) * USERS_PAGE_SIZE;
+    return filteredUsers.slice(start, start + USERS_PAGE_SIZE);
+  }, [filteredUsers, usersPageSafe]);
+
+  useEffect(() => {
+    setUsersPage(1);
+  }, [
     userSearch,
     userMembership,
     userVerification,
@@ -3660,7 +3685,7 @@ export function DashboardTabs({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredUsers.length === 0 ? (
+                  {paginatedUsers.length === 0 ? (
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
@@ -3670,7 +3695,7 @@ export function DashboardTabs({
                       </td>
                     </tr>
                   ) : (
-                    filteredUsers.map((user) => (
+                    paginatedUsers.map((user) => (
                       <tr
                         key={user.id}
                         onClick={() =>
@@ -3976,6 +4001,35 @@ export function DashboardTabs({
               </table>
             </div>
           </div>
+
+          {filteredUsers.length > USERS_PAGE_SIZE ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-slate-600">
+                Page {usersPageSafe} of {usersTotalPages} · {filteredUsers.length}{" "}
+                users
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={usersPageSafe <= 1}
+                  onClick={() => setUsersPage((page) => Math.max(1, page - 1))}
+                  className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={usersPageSafe >= usersTotalPages}
+                  onClick={() =>
+                    setUsersPage((page) => Math.min(usersTotalPages, page + 1))
+                  }
+                  className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          ) : null}
         </>
       ) : activeTab === "birthday-date" ? (
         <>

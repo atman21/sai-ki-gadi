@@ -1,4 +1,7 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import {
+  permissionDeniedResponse,
+  requireAdminApi,
+} from "@/lib/admin-api";
 import { randomUUID } from "crypto";
 
 import { NextResponse } from "next/server";
@@ -8,6 +11,7 @@ import {
   recordFailure,
   recordSuccess,
 } from "@/lib/admin-audit";
+import { actorHasPermission } from "@/lib/admin-rbac";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -33,6 +37,17 @@ function normalizeMediaKind(value: FormDataEntryValue | null): "image" | "video"
 export async function POST(request: Request) {
   const __adminGate = await requireAdminApi();
   if (!__adminGate.ok) return __adminGate.response;
+
+  // Shared media upload used by sliders / winners tooling — require either manage key.
+  const canUpload =
+    actorHasPermission(__adminGate.actor, "sliders.manage") ||
+    actorHasPermission(__adminGate.actor, "winners.manage");
+  if (!canUpload) {
+    return permissionDeniedResponse(__adminGate.actor, "sliders.manage", {
+      request,
+      auditModule: "upload",
+    });
+  }
 
   try {
     const formData = await request.formData();
