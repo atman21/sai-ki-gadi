@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
 type WalletTransactionType = "credit" | "debit";
@@ -22,10 +22,13 @@ function normalizeAmount(value: unknown): number | null {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("members.wallet", {
+    request,
+    auditModule: "wallet",
+  });
   if (!gate.ok) return gate.response;
 
   const { id } = await params;
@@ -90,7 +93,10 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("members.wallet", {
+    request,
+    auditModule: "wallet",
+  });
   if (!gate.ok) return gate.response;
 
   const { id } = await params;

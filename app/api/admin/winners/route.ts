@@ -1,10 +1,14 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+
 export async function POST(request: Request) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("winners.manage", {
+    request,
+    auditModule: "winners",
+  });
   if (!gate.ok) return gate.response;
+
   try {
     const body = await request.json();
     const date = body.date;
@@ -16,8 +20,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Winner text is required (maximum 5000 characters)" }, { status: 400 });
     }
     const payload = { date, winner_text: winnerText, user_id: null, slot: "", image: null, media_type: "image" };
-    
-    const { error } = await supabaseAdmin.from("winners").insert(payload);
+
+    const { error } = await gate.supabase.from("winners").insert(payload);
     if (error) {
       void recordFailure({
         actor: gate.actor,

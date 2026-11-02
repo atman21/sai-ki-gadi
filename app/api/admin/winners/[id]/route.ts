@@ -1,10 +1,14 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("winners.manage", {
+    request,
+    auditModule: "winners",
+  });
   if (!gate.ok) return gate.response;
+
   try {
     const body = await request.json();
     const date = body.date;
@@ -17,12 +21,12 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     }
     const payload = { date, winner_text: winnerText, user_id: null, slot: "", image: null, media_type: "image" };
     const { id } = await context.params;
-    const { data: before } = await supabaseAdmin
+    const { data: before } = await gate.supabase
       .from("winners")
       .select("date, winner_text")
       .eq("id", id)
       .maybeSingle();
-    const { error } = await supabaseAdmin.from("winners").update(payload).eq("id", id);
+    const { error } = await gate.supabase.from("winners").update(payload).eq("id", id);
     if (error) {
       void recordFailure({
         actor: gate.actor,
@@ -58,6 +62,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     return NextResponse.json({ error: "Unable to save winner" }, { status: 500 });
   }
 }
+
 export async function DELETE(
   request: Request,
   context: {
@@ -66,23 +71,26 @@ export async function DELETE(
     }>;
   },
 ) {
-  const __adminGate = await requireAdminApi();
-  if (!__adminGate.ok) return __adminGate.response;
+  const gate = await requireAdminPermission("winners.manage", {
+    request,
+    auditModule: "winners",
+  });
+  if (!gate.ok) return gate.response;
 
   try {
     const { id } = await context.params;
 
-    const { data: before } = await supabaseAdmin
+    const { data: before } = await gate.supabase
       .from("winners")
       .select("date, winner_text")
       .eq("id", id)
       .maybeSingle();
 
-    const { error } = await supabaseAdmin.from("winners").delete().eq("id", id);
+    const { error } = await gate.supabase.from("winners").delete().eq("id", id);
 
     if (error) {
       void recordFailure({
-        actor: __adminGate.actor,
+        actor: gate.actor,
         action: "winner_deleted",
         module: "winners",
         description: `Failed to delete winner ${id}`,
@@ -103,7 +111,7 @@ export async function DELETE(
     }
 
     void recordSuccess({
-      actor: __adminGate.actor,
+      actor: gate.actor,
       action: "winner_deleted",
       module: "winners",
       description: `Winner ${id} deleted`,
