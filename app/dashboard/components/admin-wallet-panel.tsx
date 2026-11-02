@@ -26,6 +26,23 @@ type WalletResponse = {
   };
 };
 
+type WalletPostResponse = {
+  ok: boolean;
+  error?: string;
+  held?: boolean;
+  lot?: {
+    lot_id: string;
+    status: string;
+    expires_on: string | null;
+    winner_id: string;
+    recipient_user_id: string;
+    amount: number;
+    duplicate?: boolean;
+    spendable?: boolean;
+  };
+  result?: unknown;
+};
+
 const SOURCE_OPTIONS = {
   credit: [
     ["lucky_draw_prize", "Lucky Draw Prize"],
@@ -80,12 +97,18 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [heldNotice, setHeldNotice] = useState<string | null>(null);
   const [transactionType, setTransactionType] = useState<"credit" | "debit">("credit");
   const [amount, setAmount] = useState("");
   const [source, setSource] = useState("lucky_draw_prize");
   const [remarks, setRemarks] = useState("");
+  const [winnerId, setWinnerId] = useState("");
   const [referenceId, setReferenceId] = useState("");
+  const [expiresOn, setExpiresOn] = useState("");
   const pendingSubmission = useRef<{ fingerprint: string; key: string } | null>(null);
+
+  const prizeCredit = transactionType === "credit" && source === "lucky_draw_prize";
+  const expiryAllowed = prizeCredit;
 
   const loadWallet = useCallback(async () => {
     setError(null);
@@ -114,16 +137,24 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
     setSource(transactionType === "credit" ? "lucky_draw_prize" : "wallet_usage");
   }, [transactionType]);
 
+  useEffect(() => {
+    if (!expiryAllowed) setExpiresOn("");
+  }, [expiryAllowed]);
+
   const parsedAmount = Number(amount);
+  const datedHoldPreview = prizeCredit && Boolean(expiresOn.trim());
   const balanceAfter = useMemo(() => {
     if (balance == null || !Number.isFinite(parsedAmount) || parsedAmount <= 0) return null;
+    // Held dated prizes do not change spendable balance.
+    if (datedHoldPreview) return balance;
     return transactionType === "credit" ? balance + parsedAmount : balance - parsedAmount;
-  }, [balance, parsedAmount, transactionType]);
+  }, [balance, parsedAmount, transactionType, datedHoldPreview]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     setSuccess(null);
+    setHeldNotice(null);
 
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       setError("Enter a valid amount.");
@@ -137,14 +168,25 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       setError("Remarks are required.");
       return;
     }
+    if (prizeCredit && !winnerId.trim()) {
+      setError("Winner ID is required for Lucky Draw prize credits.");
+      return;
+    }
     if (transactionType === "debit" && balance != null && parsedAmount > balance) {
       setError("Debit cannot exceed the available wallet balance.");
       return;
     }
 
-    const confirmed = window.confirm(
-      `${transactionType === "credit" ? "Credit" : "Debit"} ${money(parsedAmount)}?\n\nThis financial ledger entry cannot be edited or deleted.`,
-    );
+    const confirmLines = [
+      `${transactionType === "credit" ? "Credit" : "Debit"} ${money(parsedAmount)}?`,
+      "",
+      prizeCredit
+        ? datedHoldPreview
+          ? `This creates a HELD Lucky Draw prize lot (expires ${expiresOn.trim()}). It will NOT add spendable wallet credit.`
+          : "This creates and posts an undated Lucky Draw prize lot as spendable wallet credit."
+        : "This financial ledger entry cannot be edited or deleted.",
+    ];
+    const confirmed = window.confirm(confirmLines.join("\n"));
     if (!confirmed) return;
 
     const fingerprint = JSON.stringify({
@@ -152,7 +194,9 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       amount: parsedAmount,
       source,
       remarks: remarks.trim(),
-      reference_id: referenceId.trim() || null,
+      winner_id: prizeCredit ? winnerId.trim() : null,
+      reference_id: prizeCredit ? winnerId.trim() : referenceId.trim() || null,
+      expires_on: expiryAllowed ? expiresOn.trim() || null : null,
     });
     if (!pendingSubmission.current || pendingSubmission.current.fingerprint !== fingerprint) {
       pendingSubmission.current = {
@@ -171,12 +215,43 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
           amount: parsedAmount,
           source,
           remarks: remarks.trim(),
-          reference_type: referenceId.trim() ? source : null,
-          reference_id: referenceId.trim() || null,
+          winner_id: prizeCredit ? winnerId.trim() : null,
+          reference_type: prizeCredit
+            ? "lucky_draw_winner"
+            : referenceId.trim()
+              ? source
+              : null,
+          reference_id: prizeCredit ? winnerId.trim() : referenceId.trim() || null,
+          expires_on: expiryAllowed ? expiresOn.trim() || null : null,
           idempotency_key: pendingSubmission.current.key,
         }),
       });
-      const data = (await response.json()) as { ok: boolean; error?: string };
+      const data = (await response.json()) as WalletPostResponse;
+
+      if (response.status === 409 && data.held) {
+        pendingSubmission.current = null;
+        setAmount("");
+        setRemarks("");
+        setWinnerId("");
+        setExpiresOn("");
+        const lot = data.lot;
+        const duplicateNote = lot?.duplicate ? " (idempotent retry — same held lot)." : "";
+        setHeldNotice(
+          [
+            data.error || "Lucky Draw prize is held and is not spendable credit.",
+            lot
+              ? `Lot ${lot.lot_id} · winner ${lot.winner_id} · expires ${lot.expires_on ?? "—"} · status ${lot.status}.`
+              : null,
+            duplicateNote || null,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+        setLoading(true);
+        await loadWallet();
+        return;
+      }
+
       if (!response.ok || !data.ok) {
         throw new Error(data.error || "Unable to post wallet transaction.");
       }
@@ -184,8 +259,14 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
       pendingSubmission.current = null;
       setAmount("");
       setRemarks("");
+      setWinnerId("");
       setReferenceId("");
-      setSuccess("Wallet transaction posted successfully.");
+      setExpiresOn("");
+      const lotNote =
+        data.lot?.lot_id != null
+          ? ` Prize lot ${data.lot.lot_id} posted${data.lot.duplicate ? " (idempotent retry)." : "."}`
+          : "";
+      setSuccess(`Wallet transaction posted successfully.${lotNote}`);
       setLoading(true);
       await loadWallet();
     } catch (err) {
@@ -201,7 +282,8 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
         <div>
           <h2 className="text-lg font-bold text-slate-900">Wallet</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Credit or debit this user's wallet. Every change is stored in an immutable transaction ledger.
+            Credit or debit this user wallet. Lucky Draw prizes use prize lots — dated prizes stay held
+            until posted; undated prizes post as spendable credit.
           </p>
         </div>
         <div className="rounded-xl bg-slate-900 px-5 py-3 text-white">
@@ -257,16 +339,45 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
             </select>
           </label>
 
-          <label className="text-sm font-semibold text-slate-700">
-            Reference ID <span className="font-normal text-slate-400">(optional)</span>
-            <input
-              value={referenceId}
-              onChange={(event) => setReferenceId(event.target.value)}
-              placeholder="Winner / refund / usage ref"
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
-              disabled={posting}
-            />
-          </label>
+          {prizeCredit ? (
+            <label className="text-sm font-semibold text-slate-700">
+              Winner ID <span className="text-red-600">*</span>
+              <input
+                value={winnerId}
+                onChange={(event) => setWinnerId(event.target.value)}
+                placeholder="winners.id UUID"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
+                disabled={posting}
+              />
+            </label>
+          ) : (
+            <label className="text-sm font-semibold text-slate-700">
+              Reference ID <span className="font-normal text-slate-400">(optional)</span>
+              <input
+                value={referenceId}
+                onChange={(event) => setReferenceId(event.target.value)}
+                placeholder="Refund / usage ref"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
+                disabled={posting}
+              />
+            </label>
+          )}
+
+          {expiryAllowed ? (
+            <label className="text-sm font-semibold text-slate-700">
+              Expiry (IST) <span className="font-normal text-slate-400">(optional)</span>
+              <input
+                type="date"
+                value={expiresOn}
+                onChange={(event) => setExpiresOn(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
+                disabled={posting}
+              />
+              <span className="mt-1 block text-xs font-normal text-slate-500">
+                Leave blank to post spendable credit now. A date creates a held lot (not spendable).
+              </span>
+            </label>
+          ) : null}
 
           <label className="text-sm font-semibold text-slate-700 md:col-span-2 lg:col-span-3">
             Remarks <span className="text-red-600">*</span>
@@ -281,7 +392,9 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
           </label>
 
           <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Balance After</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {datedHoldPreview ? "Spendable After (held)" : "Balance After"}
+            </p>
             <p className={`mt-1 text-lg font-bold ${balanceAfter != null && balanceAfter < 0 ? "text-red-600" : "text-slate-900"}`}>
               {balanceAfter == null ? "—" : money(balanceAfter)}
             </p>
@@ -289,6 +402,11 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
         </div>
 
         {error ? <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</p> : null}
+        {heldNotice ? (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+            Held prize — not spendable. {heldNotice}
+          </p>
+        ) : null}
         {success ? <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{success}</p> : null}
 
         <div className="mt-4 flex justify-end">
@@ -297,7 +415,15 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
             disabled={posting || loading || balance == null}
             className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {posting ? "Posting..." : transactionType === "credit" ? "Add Credit" : "Add Debit"}
+            {posting
+              ? "Saving..."
+              : prizeCredit
+                ? datedHoldPreview
+                  ? "Create Held Prize Lot"
+                  : "Post Prize Lot Credit"
+                : transactionType === "credit"
+                  ? "Add Credit"
+                  : "Add Debit"}
           </button>
         </div>
       </form>
@@ -306,7 +432,7 @@ export function AdminWalletPanel({ userId }: { userId: string }) {
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h3 className="font-bold text-slate-900">Transaction Ledger</h3>
-            <p className="text-xs text-slate-500">Latest 100 transactions. Ledger entries are not editable or deletable.</p>
+            <p className="text-xs text-slate-500">Latest 100 transactions. Ledger entries are not editable or deletable. Held prize lots do not appear here until posted.</p>
           </div>
           <button
             type="button"

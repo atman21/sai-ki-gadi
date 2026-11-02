@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 
 import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
+import {
+  buildLuckyDrawLotIdempotencyKey,
+  HELD_PRIZE_MESSAGE,
+  kolkataDateKey,
+  planLuckyDrawPrizeLot,
+  validateWinnerRecipientLink,
+} from "@/lib/lucky-draw-prize-lot";
 
 type WalletTransactionType = "credit" | "debit";
 
@@ -19,6 +26,12 @@ function normalizeAmount(value: unknown): number | null {
   if (!Number.isFinite(amount) || amount <= 0) return null;
   if (Math.abs(amount - Number(amount.toFixed(2))) > 1e-9) return null;
   return amount;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 export async function GET(
@@ -142,6 +155,286 @@ export async function POST(
     );
   }
 
+  const isLuckyDrawPrizeCredit =
+    transactionType === "credit" && source === "lucky_draw_prize";
+
+  // --- A19 prize-lot path: never bare admin_post_wallet_transaction for prizes ---
+  if (isLuckyDrawPrizeCredit) {
+    const plan = planLuckyDrawPrizeLot({
+      transactionType,
+      source,
+      expiresOnRaw: body.expires_on,
+      todayKey: kolkataDateKey(),
+    });
+    if (plan.kind === "reject") {
+      return NextResponse.json({ ok: false, error: plan.error }, { status: plan.status });
+    }
+
+    const winnerIdRaw = body.winner_id ?? body.reference_id;
+    const { data: winnerRow, error: winnerLookupError } = await gate.supabase
+      .from("winners")
+      .select("id, user_id")
+      .eq("id", String(winnerIdRaw ?? "").trim())
+      .maybeSingle();
+
+    if (winnerLookupError) {
+      const message = safeErrorMessage(winnerLookupError, "Unable to verify winner.");
+      await recordFailure({
+        actor: gate.actor,
+        action: "wallet_transaction_failed",
+        module: "wallet",
+        description: `Lucky Draw prize lot failed for member ${id}`,
+        resourceType: "lucky_draw_prize_lot",
+        resourceId: id,
+        relatedUserId: id,
+        reason: message,
+        metadata: { amount, source, winner_id: winnerIdRaw ?? null },
+        ...clientMetaFromRequest(request),
+      });
+      return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    }
+
+    const link = validateWinnerRecipientLink({
+      winnerIdRaw,
+      routeUserId: id,
+      winnerRow: winnerRow
+        ? { id: String(winnerRow.id), user_id: (winnerRow.user_id as string | null) ?? null }
+        : null,
+    });
+    if (!link.ok) {
+      await recordFailure({
+        actor: gate.actor,
+        action: "wallet_transaction_failed",
+        module: "wallet",
+        description: `Lucky Draw prize lot rejected for member ${id}`,
+        resourceType: "lucky_draw_prize_lot",
+        resourceId: id,
+        relatedUserId: id,
+        reason: link.error,
+        metadata: {
+          amount,
+          source,
+          winner_id: String(winnerIdRaw ?? "").trim() || null,
+          expires_on: plan.expiresOn,
+        },
+        ...clientMetaFromRequest(request),
+      });
+      return NextResponse.json({ ok: false, error: link.error }, { status: link.status });
+    }
+
+    const lotIdempotencyKey = buildLuckyDrawLotIdempotencyKey({
+      userId: link.recipientUserId,
+      winnerId: link.winnerId,
+      amount,
+      expiresOn: plan.expiresOn,
+      clientKey: idempotencyKey,
+    });
+
+    const lotMeta = {
+      transaction_type: transactionType,
+      amount,
+      source,
+      winner_id: link.winnerId,
+      recipient_user_id: link.recipientUserId,
+      expires_on: plan.expiresOn,
+      remarks,
+      idempotency_key: lotIdempotencyKey,
+      plan: plan.kind,
+    };
+
+    const { data: createData, error: createError } = await gate.supabase.rpc(
+      "admin_create_held_lucky_draw_prize_lot",
+      {
+        p_winner_id: link.winnerId,
+        p_recipient_user_id: link.recipientUserId,
+        p_amount: amount,
+        p_expires_on: plan.expiresOn,
+        p_idempotency_key: lotIdempotencyKey,
+        p_remarks: remarks,
+        p_created_by: "admin_panel",
+      },
+    );
+
+    if (createError) {
+      const message = safeErrorMessage(createError, "Unable to create Lucky Draw prize lot.");
+      await recordFailure({
+        actor: gate.actor,
+        action: "wallet_transaction_failed",
+        module: "wallet",
+        description: `Lucky Draw prize lot create failed for member ${id}`,
+        resourceType: "lucky_draw_prize_lot",
+        resourceId: id,
+        relatedUserId: id,
+        reason: message,
+        metadata: lotMeta,
+        ...clientMetaFromRequest(request),
+      });
+      return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    }
+
+    const createRecord = asRecord(createData);
+    const lotId =
+      createRecord && createRecord.lot_id != null ? String(createRecord.lot_id) : null;
+    const lotStatus =
+      createRecord && createRecord.status != null ? String(createRecord.status) : null;
+    const duplicate = Boolean(createRecord?.duplicate);
+
+    if (!lotId) {
+      const message = "Prize lot create returned no lot id.";
+      await recordFailure({
+        actor: gate.actor,
+        action: "wallet_transaction_failed",
+        module: "wallet",
+        description: `Lucky Draw prize lot create incomplete for member ${id}`,
+        resourceType: "lucky_draw_prize_lot",
+        resourceId: id,
+        relatedUserId: id,
+        reason: message,
+        metadata: { ...lotMeta, create: createRecord },
+        ...clientMetaFromRequest(request),
+      });
+      return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    }
+
+    // Dated prizes stay held — never call admin_post_held_* / bare wallet credit.
+    if (plan.kind === "dated_hold") {
+      await recordSuccess({
+        actor: gate.actor,
+        action: "lucky_draw_prize_lot_held",
+        module: "wallet",
+        description: `Lucky Draw prize lot ${lotId} held for member ${id} (expires ${plan.expiresOn})`,
+        resourceType: "lucky_draw_prize_lot",
+        resourceId: lotId,
+        relatedUserId: id,
+        afterData: createRecord,
+        metadata: lotMeta,
+        ...clientMetaFromRequest(request),
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          held: true,
+          error: HELD_PRIZE_MESSAGE,
+          lot: {
+            lot_id: lotId,
+            status: lotStatus ?? "held",
+            expires_on: plan.expiresOn,
+            winner_id: link.winnerId,
+            recipient_user_id: link.recipientUserId,
+            amount,
+            duplicate,
+            spendable: false,
+          },
+        },
+        { status: 409 },
+      );
+    }
+
+    // Undated: if already posted (idempotent retry), return success without re-posting.
+    if (lotStatus && lotStatus !== "held") {
+      await recordSuccess({
+        actor: gate.actor,
+        action: "wallet_transaction_posted",
+        module: "wallet",
+        description: `Lucky Draw prize lot ${lotId} already posted for member ${id}`,
+        resourceType: "lucky_draw_prize_lot",
+        resourceId: lotId,
+        relatedUserId: id,
+        afterData: createRecord,
+        metadata: { ...lotMeta, duplicate: true },
+        ...clientMetaFromRequest(request),
+      });
+      return NextResponse.json({
+        ok: true,
+        result: createRecord,
+        lot: {
+          lot_id: lotId,
+          status: lotStatus,
+          expires_on: null,
+          winner_id: link.winnerId,
+          recipient_user_id: link.recipientUserId,
+          amount,
+          duplicate: true,
+          spendable: true,
+        },
+      });
+    }
+
+    const { data: postData, error: postError } = await gate.supabase.rpc(
+      "admin_post_held_lucky_draw_prize_lot",
+      {
+        p_lot_id: lotId,
+        p_created_by: "admin_panel",
+      },
+    );
+
+    if (postError) {
+      const message = safeErrorMessage(postError, "Unable to post Lucky Draw prize lot.");
+      await recordFailure({
+        actor: gate.actor,
+        action: "wallet_transaction_failed",
+        module: "wallet",
+        description: `Lucky Draw prize lot post failed for member ${id}`,
+        resourceType: "lucky_draw_prize_lot",
+        resourceId: lotId,
+        relatedUserId: id,
+        reason: message,
+        metadata: { ...lotMeta, lot_id: lotId },
+        ...clientMetaFromRequest(request),
+      });
+      return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    }
+
+    const postRecord = asRecord(postData);
+    const transactionId =
+      postRecord && postRecord.transaction_id != null
+        ? String(postRecord.transaction_id)
+        : lotId;
+
+    await recordSuccess({
+      actor: gate.actor,
+      action: "wallet_transaction_posted",
+      module: "wallet",
+      description: `Lucky Draw prize lot ${lotId} posted for member ${id}`,
+      resourceType: "wallet_transaction",
+      resourceId: transactionId,
+      relatedUserId: id,
+      afterData: postRecord,
+      metadata: lotMeta,
+      ...clientMetaFromRequest(request),
+    });
+
+    return NextResponse.json({
+      ok: true,
+      result: postRecord,
+      lot: {
+        lot_id: lotId,
+        status: postRecord?.status ?? "active",
+        expires_on: null,
+        winner_id: link.winnerId,
+        recipient_user_id: link.recipientUserId,
+        amount,
+        duplicate: Boolean(postRecord?.duplicate) || duplicate,
+        spendable: true,
+      },
+    });
+  }
+
+  // Reject stray expiry on non-prize transactions.
+  const strayExpiry = planLuckyDrawPrizeLot({
+    transactionType,
+    source,
+    expiresOnRaw: body.expires_on,
+    todayKey: kolkataDateKey(),
+  });
+  if (strayExpiry.kind === "reject") {
+    return NextResponse.json(
+      { ok: false, error: strayExpiry.error },
+      { status: strayExpiry.status },
+    );
+  }
+
   const { data, error } = await gate.supabase.rpc("admin_post_wallet_transaction", {
     p_user_id: id,
     p_transaction_type: transactionType,
@@ -181,10 +474,7 @@ export async function POST(
     return NextResponse.json({ ok: false, error: message }, { status });
   }
 
-  const resultRecord =
-    data && typeof data === "object" && !Array.isArray(data)
-      ? (data as Record<string, unknown>)
-      : null;
+  const resultRecord = asRecord(data);
   const transactionId =
     resultRecord && resultRecord.id != null
       ? String(resultRecord.id)

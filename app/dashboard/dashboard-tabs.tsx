@@ -104,7 +104,8 @@ const LUCKY_DRAW_SLOT_OPTIONS: { value: string; label: string }[] = [
 
 type WinnersUser = {
   id: string;
-  user_id: string;
+  /** Null for intentional text-only winners; set only when explicitly linked. */
+  user_id: string | null;
   date: string;
   slot: string;
   image: string | null;
@@ -737,19 +738,8 @@ export function DashboardTabs({
 
   const [showWinnerModal, setShowWinnerModal] = useState(false);
 
-  const [winnerUsers, setWinnerUsers] = useState<PendingVerificationUser[]>([]);
-
-  const [selectedUserId, setSelectedUserId] = useState("");
-
   const [winnerDate, setWinnerDate] = useState("");
   const [winnerText, setWinnerText] = useState("");
-
-  const [winnerSlot, setWinnerSlot] = useState("");
-
-  const [winnerImage, setWinnerImage] = useState("");
-
-  const [winnerMediaType, setWinnerMediaType] =
-    useState<WinnerMediaType>("image");
 
   const [savingWinner, setSavingWinner] = useState(false);
 
@@ -2109,22 +2099,6 @@ export function DashboardTabs({
     router.refresh();
   };
 
-  useEffect(() => {
-    const loadUsers = async () => {
-      try {
-        const response = await fetch("/api/admin/users");
-
-        const data = await response.json();
-
-        setWinnerUsers(data.users ?? []);
-      } catch (error) {
-        console.error(error);
-      }
-    };
-
-    loadUsers();
-  }, []);
-
   const createWinner = async () => {
     try {
       setSavingWinner(true);
@@ -2170,12 +2144,8 @@ export function DashboardTabs({
 
       setShowWinnerModal(false);
 
-      setSelectedUserId("");
       setWinnerDate("");
       setWinnerText("");
-      setWinnerSlot("");
-      setWinnerImage("");
-      setWinnerMediaType("image");
       setEditingWinnerId(null);
 
       router.refresh();
@@ -5832,14 +5802,8 @@ export function DashboardTabs({
             <button
               onClick={() => {
                 setEditingWinnerId(null);
-
-                setSelectedUserId("");
                 setWinnerDate("");
                 setWinnerText("");
-                setWinnerSlot("");
-                setWinnerImage("");
-                setWinnerMediaType("image");
-
                 setShowWinnerModal(true);
               }}
               className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
@@ -5856,7 +5820,13 @@ export function DashboardTabs({
                       Date
                     </th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Winner ID
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
                       Winner Text
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Link
                     </th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
                       Actions
@@ -5869,7 +5839,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={3}
+                        colSpan={5}
                       >
                         No winners found.
                       </td>
@@ -5893,10 +5863,27 @@ export function DashboardTabs({
                           <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                             {winner.date}
                           </td>
+                          <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-700">
+                            <button
+                              type="button"
+                              title="Copy winner id for wallet prize lot"
+                              onClick={() => {
+                                void navigator.clipboard?.writeText(winner.id);
+                              }}
+                              className="rounded bg-slate-100 px-2 py-1 hover:bg-slate-200"
+                            >
+                              {winner.id}
+                            </button>
+                          </td>
                           <td className="min-w-[16rem] px-4 py-3 font-semibold text-slate-800">
                             <span className="whitespace-pre-wrap">
                               {displayText}
                             </span>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">
+                            {winner.user_id
+                              ? "Member-linked"
+                              : "Text-only"}
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
@@ -6021,6 +6008,11 @@ export function DashboardTabs({
               <button type="button" aria-label="Close" onClick={() => setShowWinnerModal(false)}>✕</button>
             </div>
             <div className="space-y-5">
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Text-only winner (no member picker). After create, copy the Winner ID
+                from the list into Wallet → Lucky Draw Prize. Multiple winners may
+                share the same draw date.
+              </p>
               <label className="block text-sm font-semibold">Date
                 <input type="date" value={winnerDate} onChange={(e) => setWinnerDate(e.target.value)}
                   className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-3" />
