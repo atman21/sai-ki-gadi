@@ -3,13 +3,29 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
+
 const client = new textToSpeech.TextToSpeechClient({
   keyFilename: "./google-tts.json",
 });
 
 export async function POST(req: Request) {
+  // Least privilege: TTS audio is used for in-app announcements.
+  const gate = await requireAdminPermission("announcements.manage", {
+    request: req,
+    auditModule: "announcements",
+  });
+  if (!gate.ok) return gate.response;
+
   try {
     const { text, language } = await req.json();
+
+    if (typeof text !== "string" || !text.trim()) {
+      return NextResponse.json(
+        { success: false, error: "Text is required." },
+        { status: 400 },
+      );
+    }
 
     let languageCode = "gu-IN";
 
@@ -19,7 +35,7 @@ export async function POST(req: Request) {
 
     const [response] = await client.synthesizeSpeech({
       input: {
-        text,   
+        text: text.trim(),
       },
       voice: {
         languageCode,
@@ -50,9 +66,12 @@ export async function POST(req: Request) {
       url: `${process.env.NEXT_PUBLIC_APP_URL}/notifications/${filename}`,
     });
   } catch (e) {
-    return NextResponse.json({
-      success: false,
-      error: String(e),
-    });
+    return NextResponse.json(
+      {
+        success: false,
+        error: safeErrorMessage(e, "Unable to generate speech audio."),
+      },
+      { status: 500 },
+    );
   }
 }
