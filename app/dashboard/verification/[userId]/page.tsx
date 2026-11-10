@@ -7,6 +7,7 @@ import {
   adminUserFullName,
   normalizeAdminUserDetail,
 } from "@/app/dashboard/components/admin-user-profile-sections";
+import { normalizeIndianMobileForReference } from "@/lib/normalize-indian-mobile";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 import { DocumentManager } from "./document-manager";
@@ -104,6 +105,20 @@ export default async function VerificationUserPage({
     notFound();
   }
 
+  const phoneKey = normalizeIndianMobileForReference(user.phone);
+  let disputeRemarks: string | null = null;
+  if (phoneKey) {
+    const disputeLookup = await supabaseAdmin
+      .from("disputed_numbers")
+      .select("id, remarks, evidence_path")
+      .eq("mobile_number", phoneKey)
+      .maybeSingle();
+    if (!disputeLookup.error && disputeLookup.data) {
+      disputeRemarks = String(disputeLookup.data.remarks ?? "");
+    }
+  }
+  const isDisputed = disputeRemarks != null;
+
   const { data: docs, error: docsError } = docsResult;
   if (docsError) {
     throw new Error(`Unable to load user documents: ${docsError.message}`);
@@ -170,14 +185,47 @@ export default async function VerificationUserPage({
           </Link>
         </div>
 
-        <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            {adminUserFullName(user)}
-          </h1>
-          <p className="mt-1 text-sm text-slate-600">
+        <section
+          className={
+            isDisputed
+              ? "mb-6 rounded-2xl border border-red-800 bg-red-950 p-6 shadow-sm text-red-50"
+              : "mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+          }
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <h1
+              className={
+                isDisputed
+                  ? "text-2xl font-bold tracking-tight text-red-50"
+                  : "text-2xl font-bold tracking-tight text-slate-900"
+              }
+            >
+              {adminUserFullName(user)}
+            </h1>
+            {isDisputed ? (
+              <span className="rounded bg-red-600 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-white">
+                DISPUTED
+              </span>
+            ) : null}
+          </div>
+          <p
+            className={
+              isDisputed
+                ? "mt-1 text-sm text-red-200"
+                : "mt-1 text-sm text-slate-600"
+            }
+          >
             Review user details and uploaded verification documents. Empty
             values show as -.
+            {isDisputed
+              ? " This phone matches a disputed number — Admin review indicator only; verification status is unchanged."
+              : ""}
           </p>
+          {isDisputed && disputeRemarks ? (
+            <p className="mt-3 rounded-lg border border-red-700 bg-red-900/60 px-3 py-2 text-sm text-red-100">
+              Dispute remarks: {disputeRemarks}
+            </p>
+          ) : null}
 
           <div className="mt-5">
             <VerificationActions

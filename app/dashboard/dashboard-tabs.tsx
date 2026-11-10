@@ -27,6 +27,7 @@ import { StatusBadge } from "@/components/admin/ui/badge";
 import { openAdminCommandPalette } from "@/components/admin/command-palette";
 
 import { AboutUsAdminPanel } from "./components/about-us-admin-panel";
+import { DisputedNumbersPanel } from "./components/disputed-numbers-panel";
 import { InAppAnnouncementsAdminPanel } from "./components/in-app-announcements-admin-panel";
 import { MembershipManagementPanel } from "./components/membership-management-panel";
 import { WalletManagementPanel } from "./components/wallet-management-panel";
@@ -55,6 +56,9 @@ type PendingVerificationUser = {
   phone: string;
   email: string;
   membershipType: "regular" | "silver" | "gold" | "platinum";
+  /** Admin review flag only — never changes verification status. */
+  isDisputed?: boolean;
+  disputedRemarks?: string | null;
 };
 
 type WinnerMediaType = "image" | "video";
@@ -139,7 +143,6 @@ type AppUser = {
   rating_count: number | null;
   blood_group: string | null;
   birth_date: string | null;
-  date_of_birth: string | null;
   reference_1_name: string | null;
   reference_1_mobile: string | null;
   reference_2_name: string | null;
@@ -342,6 +345,8 @@ export type VehicleVerificationRow = {
   user_id: string;
   registration_number: string;
   normalized_registration_number: string;
+  owner_name: string | null;
+  owner_mobile_number: string | null;
   verification_status: string;
   rejection_reason: string | null;
   created_at: string | null;
@@ -418,6 +423,7 @@ type TabKey =
   | "requirements"
   | "exchanges"
   | "fraud-reports"
+  | "disputed-numbers"
   | "priority-settings"
   | "profile-changes"
   | "car-verification"
@@ -445,6 +451,7 @@ const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "requirements",
   "exchanges",
   "fraud-reports",
+  "disputed-numbers",
   "priority-settings",
   "profile-changes",
   "car-verification",
@@ -1959,6 +1966,10 @@ export function DashboardTabs({
             highlightIfCountAboveZero: true,
           },
           {
+            key: "disputed-numbers" as TabKey,
+            label: "Disputed Numbers",
+          },
+          {
             key: "rejected-partial" as TabKey,
             label: "Rejected/Partial",
             count: rejectedPartialCount,
@@ -2383,8 +2394,9 @@ export function DashboardTabs({
         Phone: cellDash(user.phone),
         Email: cellDash(user.email),
         Plan: user.membership_type ?? "regular",
-        "Date of Birth": formatBirthDateCell(user.date_of_birth),
-        "Birth Date": formatBirthDateCell(user.birth_date),
+        "Date of Birth": formatBirthDateCell(
+          dobOverrides[user.id] ?? user.birth_date,
+        ),
         "Blood Group": cellDash(user.blood_group),
         "Reference 1 Name": cellDash(user.reference_1_name),
         "Reference 1 Mobile": cellDash(user.reference_1_mobile),
@@ -3182,16 +3194,45 @@ export function DashboardTabs({
                     pendingVerificationUsers.map((user) => (
                       <tr
                         key={user.id}
-                        className="cursor-pointer hover:bg-slate-50"
+                        className={
+                          user.isDisputed
+                            ? "cursor-pointer bg-red-950/90 text-red-50 hover:bg-red-950"
+                            : "cursor-pointer hover:bg-slate-50"
+                        }
+                        title={
+                          user.isDisputed
+                            ? user.disputedRemarks ||
+                              "Disputed number — Admin review required"
+                            : undefined
+                        }
                         onClick={() => {
                           router.push(`/dashboard/verification/${user.id}`);
                         }}
                       >
                         <td className="px-4 py-3">
-                          <p className="font-semibold text-slate-800">
-                            {user.fullName}
-                          </p>
-                          <p className="text-xs text-slate-500">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p
+                              className={
+                                user.isDisputed
+                                  ? "font-semibold text-red-50"
+                                  : "font-semibold text-slate-800"
+                              }
+                            >
+                              {user.fullName}
+                            </p>
+                            {user.isDisputed ? (
+                              <span className="rounded bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                                DISPUTED
+                              </span>
+                            ) : null}
+                          </div>
+                          <p
+                            className={
+                              user.isDisputed
+                                ? "text-xs text-red-200"
+                                : "text-xs text-slate-500"
+                            }
+                          >
                             {user.id.slice(0, 8)}...
                           </p>
                         </td>
@@ -3252,16 +3293,45 @@ export function DashboardTabs({
                   rejectedPartialUsers.map((user) => (
                     <tr
                       key={user.id}
-                      className="cursor-pointer hover:bg-slate-50"
+                      className={
+                        user.isDisputed
+                          ? "cursor-pointer bg-red-950/90 text-red-50 hover:bg-red-950"
+                          : "cursor-pointer hover:bg-slate-50"
+                      }
+                      title={
+                        user.isDisputed
+                          ? user.disputedRemarks ||
+                            "Disputed number — Admin review required"
+                          : undefined
+                      }
                       onClick={() => {
                         router.push(`/dashboard/verification/${user.id}`);
                       }}
                     >
                       <td className="px-4 py-3">
-                        <p className="font-semibold text-slate-800">
-                          {user.fullName}
-                        </p>
-                        <p className="text-xs text-slate-500">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p
+                            className={
+                              user.isDisputed
+                                ? "font-semibold text-red-50"
+                                : "font-semibold text-slate-800"
+                            }
+                          >
+                            {user.fullName}
+                          </p>
+                          {user.isDisputed ? (
+                            <span className="rounded bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                              DISPUTED
+                            </span>
+                          ) : null}
+                        </div>
+                        <p
+                          className={
+                            user.isDisputed
+                              ? "text-xs text-red-200"
+                              : "text-xs text-slate-500"
+                          }
+                        >
                           {user.id.slice(0, 8)}...
                         </p>
                       </td>
@@ -3314,12 +3384,47 @@ export function DashboardTabs({
                   </tr>
                 ) : (
                   notStartedVerificationUsers.map((user) => (
-                    <tr key={user.id} className="hover:bg-slate-50">
+                    <tr
+                      key={user.id}
+                      className={
+                        user.isDisputed
+                          ? "bg-red-950/90 text-red-50 hover:bg-red-950 cursor-pointer"
+                          : "hover:bg-slate-50 cursor-pointer"
+                      }
+                      title={
+                        user.isDisputed
+                          ? user.disputedRemarks ||
+                            "Disputed number — Admin review required"
+                          : undefined
+                      }
+                      onClick={() => {
+                        router.push(`/dashboard/verification/${user.id}`);
+                      }}
+                    >
                       <td className="px-4 py-3">
-                        <p className="font-semibold text-slate-800">
-                          {user.fullName}
-                        </p>
-                        <p className="text-xs text-slate-500">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p
+                            className={
+                              user.isDisputed
+                                ? "font-semibold text-red-50"
+                                : "font-semibold text-slate-800"
+                            }
+                          >
+                            {user.fullName}
+                          </p>
+                          {user.isDisputed ? (
+                            <span className="rounded bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                              DISPUTED
+                            </span>
+                          ) : null}
+                        </div>
+                        <p
+                          className={
+                            user.isDisputed
+                              ? "text-xs text-red-200"
+                              : "text-xs text-slate-500"
+                          }
+                        >
                           {user.id.slice(0, 8)}...
                         </p>
                       </td>
@@ -3589,9 +3694,6 @@ export function DashboardTabs({
                       Date of Birth
                     </th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Birth Date
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Blood Group
                     </th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
@@ -3738,10 +3840,9 @@ export function DashboardTabs({
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatBirthDateCell(user.date_of_birth)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatBirthDateCell(dobOverrides[user.id] ?? user.birth_date)}
+                          {formatBirthDateCell(
+                            dobOverrides[user.id] ?? user.birth_date,
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                           {cellDash(user.blood_group)}
@@ -4846,6 +4947,8 @@ export function DashboardTabs({
             </div>
           </div>
         </>
+      ) : activeTab === "disputed-numbers" ? (
+        <DisputedNumbersPanel />
       ) : activeTab === "fraud-reports" ? (
         <>
           <div className="mb-4 flex justify-end">
@@ -5387,6 +5490,12 @@ export function DashboardTabs({
                       Registration Number
                     </th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Owner Name
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Owner Mobile
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
                       Submitted
                     </th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">
@@ -5399,7 +5508,7 @@ export function DashboardTabs({
                     <tr>
                       <td
                         className="px-4 py-10 text-center text-slate-500"
-                        colSpan={4}
+                        colSpan={6}
                       >
                         No vehicles in this filter.
                       </td>
@@ -5436,6 +5545,18 @@ export function DashboardTabs({
                           </td>
                           <td className="px-4 py-3 font-semibold tracking-wide text-slate-800">
                             {vehicle.registration_number}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {vehicle.owner_name?.trim() || "Not provided"}
+                          </td>
+                          <td
+                            className="px-4 py-3 text-slate-700"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <PhoneNumberAction
+                              phone={vehicle.owner_mobile_number}
+                              emptyLabel="Not provided"
+                            />
                           </td>
                           <td className="px-4 py-3 text-slate-700">
                             {formatDateTime(vehicle.created_at)}

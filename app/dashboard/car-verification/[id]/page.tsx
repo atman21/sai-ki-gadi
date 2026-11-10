@@ -20,6 +20,8 @@ type VehicleRow = {
   user_id: string;
   registration_number: string;
   normalized_registration_number: string;
+  owner_name: string | null;
+  owner_mobile_number: string | null;
   rc_front_path: string | null;
   rc_back_path: string | null;
   insurance_policy_path: string | null;
@@ -93,6 +95,8 @@ export default async function CarVerificationDetailPage({
       user_id,
       registration_number,
       normalized_registration_number,
+      owner_name,
+      owner_mobile_number,
       rc_front_path,
       rc_back_path,
       insurance_policy_path,
@@ -193,6 +197,21 @@ export default async function CarVerificationDetailPage({
               </dd>
               <dd className="text-xs text-slate-500">
                 Normalized: {vehicle.normalized_registration_number}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Owner Name</dt>
+              <dd className="font-semibold text-slate-900">
+                {vehicle.owner_name?.trim() || "Not provided"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Owner Mobile Number</dt>
+              <dd className="text-slate-800">
+                <PhoneNumberAction
+                  phone={vehicle.owner_mobile_number}
+                  emptyLabel="Not provided"
+                />
               </dd>
             </div>
             <div>

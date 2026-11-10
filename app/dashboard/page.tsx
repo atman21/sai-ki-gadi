@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
+import { normalizeIndianMobileForReference } from "@/lib/normalize-indian-mobile";
 import { supabaseAdmin, usingServiceRole, serviceRoleConfigIssue, supabaseProjectHost } from "@/lib/supabase-admin";
 
 import { DashboardTabs, type ProfileChangeRequestRow, type VehicleVerificationRow, type RouteMinimumFareRow } from "./dashboard-tabs";
@@ -33,7 +34,6 @@ type UserRow = {
   rating_count: number | null;
   blood_group: string | null;
   birth_date: string | null;
-  date_of_birth: string | null;
   reference_1_name: string | null;
   reference_1_mobile: string | null;
   reference_2_name: string | null;
@@ -178,6 +178,9 @@ type PendingVerificationUser = {
   phone: string;
   email: string;
   membershipType: "regular" | "silver" | "gold" | "platinum";
+  /** Admin review flag only — never auto-rejects. */
+  isDisputed: boolean;
+  disputedRemarks: string | null;
 };
 
 function normalizeMembership(
@@ -259,7 +262,7 @@ export default async function DashboardPage() {
     supabaseAdmin
       .from("users")
       .select(
-        "id, first_name, last_name, phone, email, membership_type,membership_started_at,membership_expires_at,membership_duration_days, verified, status, verification_status, created_at, welcome_completed, admin_remarks, last_active_at, rating_average, rating_count, trip_points, blood_group, birth_date, date_of_birth, reference_1_name, reference_1_mobile, reference_2_name, reference_2_mobile, user_roles",
+        "id, first_name, last_name, phone, email, membership_type,membership_started_at,membership_expires_at,membership_duration_days, verified, status, verification_status, created_at, welcome_completed, admin_remarks, last_active_at, rating_average, rating_count, trip_points, blood_group, birth_date, reference_1_name, reference_1_mobile, reference_2_name, reference_2_mobile, user_roles",
       ),
     (async () => {
       // Prefer current mobile schema columns.
@@ -318,7 +321,6 @@ export default async function DashboardPage() {
       rating_count: user.rating_count ?? null,
       blood_group: user.blood_group ?? null,
       birth_date: user.birth_date ?? null,
-      date_of_birth: user.date_of_birth ?? null,
       reference_1_name: user.reference_1_name ?? null,
       reference_1_mobile: user.reference_1_mobile ?? null,
       reference_2_name: user.reference_2_name ?? null,
@@ -360,6 +362,35 @@ export default async function DashboardPage() {
   const uploadedDocUserIds = new Set(
     allDocs.filter(hasAnyUploadedDocs).map((row) => row.user_id),
   );
+  // Batch disputed mobiles (Admin review indicator only).
+  // Tolerate missing table until migration is applied (no auto-reject behaviour).
+  const disputedByMobile = new Map<string, string>();
+  {
+    const disputedResult = await supabaseAdmin
+      .from("disputed_numbers")
+      .select("mobile_number, remarks");
+    if (!disputedResult.error) {
+      for (const row of disputedResult.data ?? []) {
+        const key = normalizeIndianMobileForReference(row.mobile_number);
+        if (key) disputedByMobile.set(key, String(row.remarks ?? ""));
+      }
+    }
+  }
+
+  function withDisputeFlags(user: UserRow): PendingVerificationUser {
+    const normalized = normalizeIndianMobileForReference(user.phone);
+    const remarks = normalized ? disputedByMobile.get(normalized) : undefined;
+    return {
+      id: user.id,
+      fullName: fullNameOf(user),
+      phone: user.phone ?? "—",
+      email: user.email ?? "—",
+      membershipType: normalizeMembership(user.membership_type),
+      isDisputed: remarks != null,
+      disputedRemarks: remarks ?? null,
+    };
+  }
+
   const pendingVerificationUsers: PendingVerificationUser[] = allUsers
     .filter((user) => {
       const row = docsByUserId.get(user.id);
@@ -368,22 +399,10 @@ export default async function DashboardPage() {
         user.verification_status === "pending" && row && hasAnyUploadedDocs(row)
       );
     })
-    .map((user) => ({
-      id: user.id,
-      fullName: fullNameOf(user),
-      phone: user.phone ?? "—",
-      email: user.email ?? "—",
-      membershipType: normalizeMembership(user.membership_type),
-    }));
+    .map(withDisputeFlags);
   const rejectedPartialUsers: PendingVerificationUser[] = allUsers
     .filter((user) => user.verification_status === "rejected")
-    .map((user) => ({
-      id: user.id,
-      fullName: fullNameOf(user),
-      phone: user.phone ?? "—",
-      email: user.email ?? "—",
-      membershipType: normalizeMembership(user.membership_type),
-    }));
+    .map(withDisputeFlags);
   const notStartedVerificationUsers: PendingVerificationUser[] = allUsers
     .filter((user) => {
       return (
@@ -391,13 +410,7 @@ export default async function DashboardPage() {
         !uploadedDocUserIds.has(user.id)
       );
     })
-    .map((user) => ({
-      id: user.id,
-      fullName: fullNameOf(user),
-      phone: user.phone ?? "—",
-      email: user.email ?? "—",
-      membershipType: normalizeMembership(user.membership_type),
-    }));
+    .map(withDisputeFlags);
 
   const usersById = new Map(
     (allUsers ?? []).map((u) => [
@@ -544,6 +557,8 @@ export default async function DashboardPage() {
       user_id,
       registration_number,
       normalized_registration_number,
+      owner_name,
+      owner_mobile_number,
       verification_status,
       rejection_reason,
       created_at,
@@ -688,6 +703,15 @@ export default async function DashboardPage() {
     user_id: row.user_id,
     registration_number: row.registration_number,
     normalized_registration_number: row.normalized_registration_number,
+    owner_name:
+      "owner_name" in row
+        ? ((row as { owner_name?: string | null }).owner_name ?? null)
+        : null,
+    owner_mobile_number:
+      "owner_mobile_number" in row
+        ? ((row as { owner_mobile_number?: string | null })
+            .owner_mobile_number ?? null)
+        : null,
     verification_status: row.verification_status,
     rejection_reason: row.rejection_reason,
     created_at: row.created_at,

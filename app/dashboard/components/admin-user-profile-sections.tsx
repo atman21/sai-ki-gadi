@@ -38,7 +38,6 @@ export const ADMIN_USER_DETAIL_SELECT = [
   "admin_remarks",
   "blood_group",
   "birth_date",
-  "date_of_birth",
   "preferred_city",
   "preferred_cities",
   "experience_years",
@@ -90,7 +89,6 @@ export type AdminUserDetail = {
   admin_remarks: string | null;
   blood_group: string | null;
   birth_date: string | null;
-  date_of_birth: string | null;
   preferred_city: string | null;
   preferred_cities: unknown;
   experience_years: number | null;
@@ -197,7 +195,6 @@ export function normalizeAdminUserDetail(
     admin_remarks: asString(row.admin_remarks),
     blood_group: asString(row.blood_group),
     birth_date: asString(row.birth_date),
-    date_of_birth: asString(row.date_of_birth),
     preferred_city: asString(row.preferred_city),
     preferred_cities: row.preferred_cities ?? null,
     experience_years: asNumber(row.experience_years),
@@ -395,12 +392,8 @@ export function AdminUserProfileSections({
           value={displayValue(user.blood_group)}
         />
         <ProfileField
-          label="Birth Date"
-          value={formatDateOnly(user.birth_date)}
-        />
-        <ProfileField
           label="Date of Birth"
-          value={formatDateOnly(user.date_of_birth)}
+          value={formatDateOnly(user.birth_date)}
         />
         <ProfileField
           label="Aadhaar Number"

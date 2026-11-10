@@ -13,6 +13,7 @@ export type AdminNavTabKey =
   | "requirements"
   | "exchanges"
   | "fraud-reports"
+  | "disputed-numbers"
   | "priority-settings"
   | "profile-changes"
   | "car-verification"
@@ -127,6 +128,17 @@ const NAV_ICON_CONFIG: Record<AdminNavTabKey, NavIconConfig> = {
         <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
         <path d="M12 8v4" />
         <path d="M12 16h.01" />
+      </NavSvg>
+    ),
+  },
+  "disputed-numbers": {
+    bgClass: "bg-rose-100",
+    colorClass: "text-rose-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.81.36 1.6.7 2.34a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.74.34 1.53.57 2.34.7A2 2 0 0 1 22 16.92z" />
+        <path d="M14.5 5.5l5 5" />
+        <path d="M16 4l4 4" />
       </NavSvg>
     ),
   },
