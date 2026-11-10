@@ -61,14 +61,18 @@ export async function PUT(req: Request) {
     const gold = Number(body.all_gold_minutes);
 
     if (
-      ![matching, platinum, gold].every(
-        (n) => Number.isInteger(n) && n > 0 && n <= 1440,
-      )
+      !([body.matching_platinum_minutes, body.all_platinum_minutes, body.all_gold_minutes].every(
+        (value) => (typeof value === "number" && Number.isInteger(value)) ||
+          (typeof value === "string" && /^\d+$/.test(value.trim())),
+      ) &&
+        [matching, platinum, gold].every(
+          (n) => Number.isInteger(n) && n >= 0 && n <= 1440,
+        ))
     ) {
       return NextResponse.json(
         {
           error:
-            "Each duration must be a whole number of minutes between 1 and 1440.",
+            "Each duration must be a whole number between 0 and 1440 minutes.",
         },
         { status: 400 },
       );
