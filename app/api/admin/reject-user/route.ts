@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
-import { writeAdminAuditLog, clientMetaFromRequest } from "@/lib/admin-audit";
+import { clientMetaFromRequest, writeAdminAuditLog } from "@/lib/admin-audit";
 
 type RejectPayload = {
   userId?: string;
+  rejectionReason?: string;
 };
 
 export async function POST(request: Request) {
@@ -24,11 +25,29 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: before } = await gate.supabase
+    const rejectionReason = body.rejectionReason?.trim() || "";
+
+    let beforeQuery = await gate.supabase
       .from("users")
-      .select("id, verification_status, verified, first_name, last_name, phone")
+      .select(
+        "id, verification_status, verified, first_name, last_name, phone, verification_rejection_reason",
+      )
       .eq("id", userId)
       .maybeSingle();
+
+    if (
+      beforeQuery.error &&
+      (beforeQuery.error.code === "42703" ||
+        /verification_rejection_reason/i.test(beforeQuery.error.message))
+    ) {
+      beforeQuery = await gate.supabase
+        .from("users")
+        .select("id, verification_status, verified, first_name, last_name, phone")
+        .eq("id", userId)
+        .maybeSingle();
+    }
+
+    const before = beforeQuery.data;
 
     if (!before) {
       return NextResponse.json(
@@ -38,18 +57,38 @@ export async function POST(request: Request) {
     }
 
     const nowIso = new Date().toISOString();
-    const actorLabel =
-      gate.actor.displayName || gate.actor.username || "admin";
+    const actorLabel = gate.actor.displayName || gate.actor.username || "admin";
 
-    const { error } = await gate.supabase
+    let { error } = await gate.supabase
       .from("users")
       .update({
+        verified: false,
         verification_status: "rejected",
+        verification_rejection_reason: rejectionReason || null,
         verification_reviewed_by: actorLabel,
         verification_reviewed_at: nowIso,
         verification_reviewed_by_admin_id: gate.actor.id,
       })
       .eq("id", userId);
+
+    // Until migration 067 adds verification_rejection_reason, reject without it.
+    if (
+      error &&
+      (error.code === "42703" ||
+        /verification_rejection_reason/i.test(error.message))
+    ) {
+      const fallback = await gate.supabase
+        .from("users")
+        .update({
+          verified: false,
+          verification_status: "rejected",
+          verification_reviewed_by: actorLabel,
+          verification_reviewed_at: nowIso,
+          verification_reviewed_by_admin_id: gate.actor.id,
+        })
+        .eq("id", userId);
+      error = fallback.error;
+    }
 
     if (error) {
       void writeAdminAuditLog({
@@ -86,16 +125,23 @@ export async function POST(request: Request) {
       resourceType: "user",
       resourceId: userId,
       changedFields: [
+        "verified",
         "verification_status",
+        "verification_rejection_reason",
         "verification_reviewed_by",
         "verification_reviewed_at",
       ],
       beforeData: {
         verified: before.verified,
         verification_status: before.verification_status,
+        verification_rejection_reason:
+          (before as { verification_rejection_reason?: string | null })
+            .verification_rejection_reason ?? null,
       },
       afterData: {
+        verified: false,
         verification_status: "rejected",
+        verification_rejection_reason: rejectionReason || null,
         verification_reviewed_by: actorLabel,
         verification_reviewed_at: nowIso,
       },

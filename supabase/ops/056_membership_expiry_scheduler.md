@@ -83,8 +83,11 @@ where membership_type = 'gold'
 |----------|---------|
 | `supabase/functions/expire-memberships/` | Edge Function wrapper around `admin_expire_memberships` |
 | `app/api/admin/memberships/expire` | Manual admin-panel sweep (session-gated) |
+| `supabase/migrations/069_strict_gold_membership_no_premature_downgrade.sql` | Blocks premature Gold→Regular in RPC + `users` trigger; tightens expire RPC |
 | `supabase/ops/055_membership_expiry_cron.sql` | Documented `pg_cron` stub — **not usable** until pg_cron exists |
 | This file | Production enablement checklist |
+
+**Note:** Migration `069` enforces “no manual downgrade before expiry.” Automatic Regular conversion still depends on scheduling `expire-memberships` (or the Admin “Run expiry sweep now” button). Applying `069` alone does **not** enable a cron.
 
 ## Membership enum note
 

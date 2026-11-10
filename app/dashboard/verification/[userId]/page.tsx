@@ -2,10 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import {
-  ADMIN_USER_DETAIL_SELECT,
-  AdminUserProfileSections,
-  adminUserFullName,
-  normalizeAdminUserDetail,
+    ADMIN_USER_DETAIL_SELECT,
+    AdminUserProfileSections,
+    adminUserFullName,
+    normalizeAdminUserDetail,
 } from "@/app/dashboard/components/admin-user-profile-sections";
 import { normalizeIndianMobileForReference } from "@/lib/normalize-indian-mobile";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -231,6 +231,8 @@ export default async function VerificationUserPage({
             <VerificationActions
               userId={userId}
               isVerified={Boolean(user.verified)}
+              verificationStatus={user.verification_status}
+              rejectionReason={user.verification_rejection_reason}
             />
           </div>
         </section>
