@@ -2405,8 +2405,9 @@ export function DashboardTabs({
         Phone: cellDash(user.phone),
         Email: cellDash(user.email),
         Plan: user.membership_type ?? "regular",
-        "Date of Birth": formatBirthDateCell(user.date_of_birth),
-        "Birth Date": formatBirthDateCell(user.birth_date),
+        "Date of Birth": formatBirthDateCell(
+          dobOverrides[user.id] ?? user.birth_date ?? user.date_of_birth,
+        ),
         "Blood Group": cellDash(user.blood_group),
         "Reference 1 Name": cellDash(user.reference_1_name),
         "Reference 1 Mobile": cellDash(user.reference_1_mobile),
@@ -3608,9 +3609,6 @@ export function DashboardTabs({
                       Date of Birth
                     </th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                      Birth Date
-                    </th>
-                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Blood Group
                     </th>
                     <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
@@ -3757,10 +3755,11 @@ export function DashboardTabs({
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatBirthDateCell(user.date_of_birth)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                          {formatBirthDateCell(dobOverrides[user.id] ?? user.birth_date)}
+                          {formatBirthDateCell(
+                            dobOverrides[user.id] ??
+                              user.birth_date ??
+                              user.date_of_birth,
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                           {cellDash(user.blood_group)}
@@ -4041,10 +4040,11 @@ export function DashboardTabs({
                   Push notifications for today&apos;s birthdays
                 </h2>
                 <p className="admin-caption mt-1 max-w-2xl">
-                  Automatically notify all app users when someone has a birthday
-                  today. Uses the same FCM channel/sound as Winner
-                  notifications. Asia/Kolkata timezone. In-app birthday popup is
-                  unchanged.
+                  Sends one collective FCM digest naming today&apos;s birthday
+                  members (Asia/Kolkata). Same channel/sound as Winner
+                  notifications. Delivery requires Edge Function env
+                  BIRTHDAY_PUSH_DELIVERY=staging|enabled on a non-production
+                  project. Mobile shows personal + common list popups separately.
                 </p>
               </div>
               <span

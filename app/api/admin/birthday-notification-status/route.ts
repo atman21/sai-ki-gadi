@@ -67,13 +67,21 @@ export async function GET(request: Request) {
   try {
     const { dateKey, hhmm, minutes } = getKolkataParts();
 
-    const [settingsRes, birthdayUsersRes, logsRes] = await Promise.all([
+    const [settingsRes, birthdayUsersRes, digestRes, logsRes] = await Promise.all([
       supabaseAdmin
         .from("birthday_notification_settings")
         .select("enabled, send_time, updated_at")
         .eq("id", 1)
         .maybeSingle(),
       supabaseAdmin.rpc("list_users_with_birthday_on", { p_date: dateKey }),
+      supabaseAdmin
+        .from("birthday_notification_digests")
+        .select(
+          "id, status, body, birthday_count, sent_at, created_at, error_message, scheduled_key",
+        )
+        .eq("birthday_date", dateKey)
+        .eq("scheduled_key", "scheduled")
+        .maybeSingle(),
       supabaseAdmin
         .from("birthday_notification_logs")
         .select(
@@ -101,13 +109,34 @@ export async function GET(request: Request) {
       ? birthdayUsersRes.data.length
       : 0;
 
+    const digest = digestRes.data ?? null;
     const logs = logsRes.data ?? [];
-    const successCount = logs.filter((l) => l.status === "success").length;
-    const failureCount = logs.filter((l) => l.status === "failure").length;
-    const pendingCount = logs.filter((l) => l.status === "pending").length;
+    const successCount = digest
+      ? digest.status === "success"
+        ? 1
+        : 0
+      : logs.filter((l) => l.status === "success").length;
+    const failureCount = digest
+      ? digest.status === "failure"
+        ? 1
+        : 0
+      : logs.filter((l) => l.status === "failure").length;
+    const pendingCount = digest
+      ? digest.status === "pending" || digest.status === "partial"
+        ? 1
+        : 0
+      : logs.filter((l) => l.status === "pending").length;
 
-    const lastSuccess = logs.find((l) => l.status === "success" && l.sent_at);
-    const lastFailure = logs.find((l) => l.status === "failure");
+    const lastSuccess = digest?.status === "success" && digest.sent_at
+      ? { sent_at: digest.sent_at }
+      : logs.find((l) => l.status === "success" && l.sent_at);
+    const lastFailure = digest?.status === "failure"
+      ? {
+          sent_at: digest.sent_at,
+          created_at: digest.created_at,
+          error_message: digest.error_message,
+        }
+      : logs.find((l) => l.status === "failure");
 
     const sendTime =
       typeof settingsRes.data?.send_time === "string"
@@ -136,14 +165,29 @@ export async function GET(request: Request) {
       birthdayUsersError: birthdayUsersRes.error
         ? "Unable to load today's birthday users."
         : null,
-      logsError: logsRes.error
-        ? "Unable to load birthday notification logs."
+      logsError: logsRes.error && digestRes.error
+        ? "Unable to load birthday notification delivery status."
+        : null,
+      digestError: digestRes.error
+        ? "Digest table unavailable (apply T02 digest migration on Staging)."
+        : null,
+      digest: digest
+        ? {
+            status: digest.status,
+            birthdayCount: digest.birthday_count,
+            bodyPreview:
+              typeof digest.body === "string"
+                ? digest.body.slice(0, 160)
+                : null,
+            sentAt: digest.sent_at,
+          }
         : null,
       processed: {
         success: successCount,
         failure: failureCount,
         pending: pendingCount,
-        totalLogged: logs.length,
+        totalLogged: digest ? 1 : logs.length,
+        mode: digest ? "collective_digest" : "legacy_per_person_logs",
       },
       lastScheduledSuccessAt: lastSuccess?.sent_at ?? null,
       lastScheduledFailureAt: lastFailure?.sent_at ?? lastFailure?.created_at ?? null,

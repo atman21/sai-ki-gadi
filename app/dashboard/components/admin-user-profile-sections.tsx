@@ -395,12 +395,8 @@ export function AdminUserProfileSections({
           value={displayValue(user.blood_group)}
         />
         <ProfileField
-          label="Birth Date"
-          value={formatDateOnly(user.birth_date)}
-        />
-        <ProfileField
           label="Date of Birth"
-          value={formatDateOnly(user.date_of_birth)}
+          value={formatDateOnly(user.birth_date ?? user.date_of_birth)}
         />
         <ProfileField
           label="Aadhaar Number"
