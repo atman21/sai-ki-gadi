@@ -25,6 +25,8 @@ export const ADMIN_PERMISSIONS = [
   "listings.fare_view",
   "fraud.view",
   "fraud.manage",
+  "reviews.view",
+  "reviews.moderate",
   "cities.view",
   "cities.manage",
   "sliders.view",
@@ -76,6 +78,7 @@ export const TAB_PERMISSION_MAP: Record<string, AdminPermission> = {
   requirements: "requirements.view",
   exchanges: "exchanges.view",
   "fraud-reports": "fraud.view",
+  "member-reviews": "reviews.view",
   cities: "cities.view",
   sliders: "sliders.view",
   winners: "winners.view",
@@ -139,6 +142,11 @@ export const PERMISSION_MODULES: {
     module: "fraud",
     label: "Fraud Reports",
     permissions: ["fraud.view", "fraud.manage"],
+  },
+  {
+    module: "reviews",
+    label: "Member Reviews",
+    permissions: ["reviews.view", "reviews.moderate"],
   },
   {
     module: "content",

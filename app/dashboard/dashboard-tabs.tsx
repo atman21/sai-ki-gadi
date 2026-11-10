@@ -36,6 +36,7 @@ import { ActiveFareOverridesPanel } from "@/components/admin/active-fare-overrid
 import { AdminUsersPanel } from "@/components/admin/admin-users-panel";
 import { AdminRolesPanel } from "@/components/admin/admin-roles-panel";
 import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
+import { MemberReviewsPanel } from "@/components/admin/member-reviews-panel";
 import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
 import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
@@ -429,6 +430,7 @@ type TabKey =
   | "requirements"
   | "exchanges"
   | "fraud-reports"
+  | "member-reviews"
   | "priority-settings"
   | "profile-changes"
   | "car-verification"
@@ -456,6 +458,7 @@ const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "requirements",
   "exchanges",
   "fraud-reports",
+  "member-reviews",
   "priority-settings",
   "profile-changes",
   "car-verification",
@@ -1999,6 +2002,10 @@ export function DashboardTabs({
             label: "Fraud Reports",
             count: fraudReports?.length || 0,
             highlightIfCountAboveZero: true,
+          },
+          {
+            key: "member-reviews" as TabKey,
+            label: "Member Reviews",
           },
           {
             key: "rejected-partial" as TabKey,
@@ -4897,6 +4904,8 @@ export function DashboardTabs({
             </div>
           </div>
         </>
+      ) : activeTab === "member-reviews" ? (
+        <MemberReviewsPanel />
       ) : activeTab === "fraud-reports" ? (
         <>
           {canManageFraud ? (
