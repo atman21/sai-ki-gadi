@@ -40,6 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# SKG AI Instructions filesystem adapter (Phase 2C; pending DB migration)
+/var/skg-ai-instructions/
+
 # Google Cloud TTS credentials (never commit)
 google-tts.json
 google-tts_old.json

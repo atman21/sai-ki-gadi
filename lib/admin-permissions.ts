@@ -47,6 +47,12 @@ export const ADMIN_PERMISSIONS = [
   "birthday.manage",
   "lucky_draw.view",
   "lucky_draw.manage",
+  /** Help Center FAQ (Mobile T29 / Admin AI Management Console). */
+  "help.view",
+  "help.manage",
+  /** SKG AI Voice / settings / analytics (Mobile T29 help_ai.*). */
+  "help_ai.view",
+  "help_ai.manage",
   "admins.view",
   "admins.manage",
   "roles.manage",
@@ -91,6 +97,18 @@ export const TAB_PERMISSION_MAP: Record<string, AdminPermission> = {
   "admin-users": "admins.view",
   "admin-roles": "roles.manage",
   "audit-logs": "audit_logs.view",
+  // SKG AI Management Console (Phase 1 shell)
+  "ai-dashboard": "help_ai.view",
+  "ai-settings": "help_ai.manage",
+  "ai-knowledge-base": "help_ai.view",
+  "ai-knowledge-import": "help_ai.manage",
+  "ai-instructions": "help_ai.view",
+  "ai-faq-help": "help.view",
+  "ai-tools": "help_ai.manage",
+  "ai-test-assistant": "help_ai.manage",
+  "ai-conversations": "help_ai.view",
+  "ai-usage": "help_ai.view",
+  "ai-security-audit": "help_ai.view",
 };
 
 export const PERMISSION_MODULES: {
@@ -186,6 +204,16 @@ export const PERMISSION_MODULES: {
       "lucky_draw.manage",
       "settings.view",
     ],
+  },
+  {
+    module: "help",
+    label: "Help Center FAQ",
+    permissions: ["help.view", "help.manage"],
+  },
+  {
+    module: "help_ai",
+    label: "SKG AI Management",
+    permissions: ["help_ai.view", "help_ai.manage"],
   },
   {
     module: "administration",
