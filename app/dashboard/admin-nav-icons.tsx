@@ -13,7 +13,10 @@ export type AdminNavTabKey =
   | "requirements"
   | "exchanges"
   | "fraud-reports"
+  | "member-reviews"
   | "disputed-numbers"
+  | "help-center"
+  | "help-ai"
   | "priority-settings"
   | "profile-changes"
   | "car-verification"
@@ -131,6 +134,15 @@ const NAV_ICON_CONFIG: Record<AdminNavTabKey, NavIconConfig> = {
       </NavSvg>
     ),
   },
+  "member-reviews": {
+    bgClass: "bg-amber-100",
+    colorClass: "text-amber-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z" />
+      </NavSvg>
+    ),
+  },
   "disputed-numbers": {
     bgClass: "bg-rose-100",
     colorClass: "text-rose-700",
@@ -139,6 +151,29 @@ const NAV_ICON_CONFIG: Record<AdminNavTabKey, NavIconConfig> = {
         <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.81.36 1.6.7 2.34a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.74.34 1.53.57 2.34.7A2 2 0 0 1 22 16.92z" />
         <path d="M14.5 5.5l5 5" />
         <path d="M16 4l4 4" />
+      </NavSvg>
+    ),
+  },
+  "help-center": {
+    bgClass: "bg-sky-100",
+    colorClass: "text-sky-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+        <path d="M12 17h.01" />
+      </NavSvg>
+    ),
+  },
+  "help-ai": {
+    bgClass: "bg-teal-100",
+    colorClass: "text-teal-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+        <path d="M12 19v4" />
+        <path d="M8 23h8" />
       </NavSvg>
     ),
   },

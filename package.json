@@ -11,7 +11,8 @@
     "test:phone-actions": "node scripts/verify-phone-actions.mjs",
     "test:admin-audit": "node scripts/verify-admin-audit-helpers.mjs",
     "test:dob-canonical-t27": "node scripts/verify-dob-canonical-t27.mjs",
-    "test:disputed-numbers-t28": "node scripts/verify-disputed-numbers-t28.mjs"
+    "test:disputed-numbers-t28": "node scripts/verify-disputed-numbers-t28.mjs",
+    "test:member-reviews-t12": "node scripts/verify-member-reviews-t12.mjs"
   },
   "dependencies": {
     "@google-cloud/text-to-speech": "^6.4.1",

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
-import { writeAdminAuditLog, clientMetaFromRequest } from "@/lib/admin-audit";
+import {
+  writeAdminAuditLog,
+  clientMetaFromRequest,
+  recordFailure,
+  recordSuccess,
+} from "@/lib/admin-audit";
 import {
   getManualGoldDowngradeBlockReason,
   getMembershipLifecycleStatus,
@@ -236,7 +241,7 @@ export async function PUT(
       console.error("UPDATE USER ERROR:", error);
 
       void recordFailure({
-        actor: __adminGate.actor,
+        actor: gate.actor,
         action: "user_updated",
         module: "members",
         description: `Failed to update member ${id}`,
@@ -260,7 +265,7 @@ export async function PUT(
     }
 
     void recordSuccess({
-      actor: __adminGate.actor,
+      actor: gate.actor,
       action: "user_updated",
       module: "members",
       description: `Member ${id} updated`,
@@ -302,22 +307,29 @@ export async function DELETE(
     }>;
   },
 ) {
-  const __adminGate = await requireAdminApi();
-  if (!__adminGate.ok) return __adminGate.response;
+  const gate = await requireAdminApi();
+  if (!gate.ok) return gate.response;
 
   try {
     const { id } = await context.params;
 
-    const { error } = await __adminGate.supabase
+    const { data: before } = await gate.supabase
       .from("users")
-      .delete()
-      .eq("id", id);
+      .select("id, first_name, last_name, phone")
+      .eq("id", id)
+      .maybeSingle();
+    const entityLabel =
+      [before?.first_name, before?.last_name].filter(Boolean).join(" ").trim() ||
+      before?.phone ||
+      id;
+
+    const { error } = await gate.supabase.from("users").delete().eq("id", id);
 
     if (error) {
       console.error("DELETE USER ERROR:", error);
 
       void recordFailure({
-        actor: __adminGate.actor,
+        actor: gate.actor,
         action: "user_deleted",
         module: "members",
         description: `Failed to delete member ${entityLabel}`,
@@ -340,7 +352,7 @@ export async function DELETE(
     }
 
     await recordSuccess({
-      actor: __adminGate.actor,
+      actor: gate.actor,
       action: "user_deleted",
       module: "members",
       description: `Member ${entityLabel} deleted`,

@@ -32,6 +32,7 @@ import { AdminRolesPanel } from "@/components/admin/admin-roles-panel";
 import { AdminUsersPanel } from "@/components/admin/admin-users-panel";
 import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
 import { FareOverrideRequestsPanel } from "@/components/admin/fare-override-requests-panel";
+import { MemberReviewsPanel } from "@/components/admin/member-reviews-panel";
 import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
 import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
@@ -40,6 +41,8 @@ import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { AdminNavIcon } from "./admin-nav-icons";
 import { AboutUsAdminPanel } from "./components/about-us-admin-panel";
 import { DisputedNumbersPanel } from "./components/disputed-numbers-panel";
+import { HelpAiPanel } from "./components/help-ai-panel";
+import { HelpCenterPanel } from "./components/help-center-panel";
 import { InAppAnnouncementsAdminPanel } from "./components/in-app-announcements-admin-panel";
 import { getManualGoldDowngradeBlockReason } from "@/lib/admin-membership-status";
 import { MembershipManagementPanel } from "./components/membership-management-panel";
@@ -427,7 +430,10 @@ type TabKey =
   | "requirements"
   | "exchanges"
   | "fraud-reports"
+  | "member-reviews"
   | "disputed-numbers"
+  | "help-center"
+  | "help-ai"
   | "priority-settings"
   | "profile-changes"
   | "car-verification"
@@ -455,7 +461,10 @@ const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "requirements",
   "exchanges",
   "fraud-reports",
+  "member-reviews",
   "disputed-numbers",
+  "help-center",
+  "help-ai",
   "priority-settings",
   "profile-changes",
   "car-verification",
@@ -2029,6 +2038,10 @@ export function DashboardTabs({
             highlightIfCountAboveZero: true,
           },
           {
+            key: "member-reviews" as TabKey,
+            label: "Member Reviews",
+          },
+          {
             key: "disputed-numbers" as TabKey,
             label: "Disputed Numbers",
           },
@@ -2095,6 +2108,8 @@ export function DashboardTabs({
           },
           { key: "in-app-popups" as TabKey, label: "In-App Pop-ups" },
           { key: "birthday-date" as TabKey, label: "Birthday" },
+          { key: "help-center" as TabKey, label: "Help Center" },
+          { key: "help-ai" as TabKey, label: "Help AI Voice" },
         ],
       },
       {
@@ -5274,6 +5289,8 @@ export function DashboardTabs({
               </div>
             </div>
           </>
+        ) : activeTab === "member-reviews" ? (
+          <MemberReviewsPanel />
         ) : activeTab === "fraud-reports" ? (
           <>
             <div className="mb-4 flex justify-end">
@@ -6146,6 +6163,10 @@ export function DashboardTabs({
           <AboutUsAdminPanel />
         ) : activeTab === "disputed-numbers" ? (
           <DisputedNumbersPanel />
+        ) : activeTab === "help-center" ? (
+          <HelpCenterPanel />
+        ) : activeTab === "help-ai" ? (
+          <HelpAiPanel />
         ) : activeTab === "wallet-management" ? (
           <WalletManagementPanel />
         ) : activeTab === "membership-management" ? (
