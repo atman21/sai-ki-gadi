@@ -1,3 +1,12 @@
+import {
+  permissionDeniedResponse,
+  requireAdminApi,
+  requireAdminPermission,
+  safeErrorMessage,
+} from "@/lib/admin-api";
+import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
+import { actorHasPermission } from "@/lib/admin-rbac";
+import { isAdminUuid } from "@/lib/admin-uuid";
 import { NextResponse } from "next/server";
 
 import { requireAdminApi, safeErrorMessage } from "@/lib/admin-api";
@@ -26,6 +35,12 @@ export async function PUT(
 
   try {
     const { id } = await context.params;
+    if (!isAdminUuid(id)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid user ID." },
+        { status: 400 },
+      );
+    }
 
     const body = await request.json();
 
@@ -52,7 +67,31 @@ export async function PUT(
       updateData.admin_remarks = admin_remarks;
     }
 
+    const profileFieldsRequested =
+      typeof status === "boolean" ||
+      typeof welcome_completed === "boolean" ||
+      typeof admin_remarks === "string";
+    if (
+      profileFieldsRequested &&
+      !actorHasPermission(__adminGate.actor, "members.edit")
+    ) {
+      return permissionDeniedResponse(__adminGate.actor, "members.edit", {
+        request,
+        auditModule: "members",
+      });
+    }
+
     if (membership_type) {
+      if (!actorHasPermission(__adminGate.actor, "members.membership")) {
+        return permissionDeniedResponse(
+          __adminGate.actor,
+          "members.membership",
+          {
+            request,
+            auditModule: "members",
+          },
+        );
+      }
       if (membership_type !== "gold" && membership_type !== "regular") {
         return NextResponse.json(
           { error: "Invalid membership type" },
@@ -174,52 +213,37 @@ export async function PUT(
         },
       );
       if (membershipError) {
-        const rpcMessage = safeErrorMessage(
-          membershipError,
-          "Membership update failed.",
-        );
-        const premature =
-          /Cannot downgrade (active )?Gold membership/i.test(rpcMessage) ||
-          /before expiry/i.test(rpcMessage);
+        void recordFailure({
+          actor: __adminGate.actor,
+          action: "user_updated",
+          module: "members",
+          description: `Failed to update membership for member ${id}`,
+          resourceType: "user",
+          resourceId: id,
+          relatedUserId: id,
+          reason: membershipError.message,
+          metadata: { membership_type, membership_duration_days: days },
+          ...clientMetaFromRequest(request),
+        });
         return NextResponse.json(
-          { error: rpcMessage },
-          { status: premature ? 409 : 500 },
+          {
+            error: safeErrorMessage(
+              membershipError,
+              "Failed to update membership.",
+            ),
+          },
+          { status: 500 },
         );
       }
-
-      const actorLabel =
-        gate.actor.displayName || gate.actor.username || "admin";
-      const memberName = [currentUser.first_name, currentUser.last_name]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-
-      void writeAdminAuditLog({
-        actor: gate.actor,
-        action:
-          membership_type === "gold" && !isActiveGold
-            ? "membership_converted_to_gold"
-            : membership_type === "gold"
-              ? "membership_gold_renewed"
-              : "membership_set_regular",
-        module: "members",
-        description:
-          membership_type === "gold" && !isActiveGold
-            ? `Member ${memberName || currentUser.phone || id} converted to Gold by ${actorLabel}`
-            : `Member ${memberName || currentUser.phone || id} membership set to ${membership_type} by ${actorLabel}`,
-        success: true,
-        resourceType: "user",
-        resourceId: id,
-        beforeData: {
-          membership_type: currentUser.membership_type,
-          membership_expires_at: currentUser.membership_expires_at,
-        },
-        afterData: {
-          membership_type,
-          membership_duration_days: days,
-        },
-        ...clientMetaFromRequest(request),
-      });
+      membershipAudit = {
+        membership_type,
+        membership_duration_days: days,
+        membership_amount: amount,
+        membership_payment_status: paymentStatus,
+        has_payment_reference:
+          typeof body.membership_payment_reference === "string" &&
+          body.membership_payment_reference.trim().length > 0,
+      };
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -256,7 +280,7 @@ export async function PUT(
 
       return NextResponse.json(
         {
-          error: error.message,
+          error: safeErrorMessage(error, "Failed to update member."),
         },
         {
           status: 500,
@@ -307,11 +331,20 @@ export async function DELETE(
     }>;
   },
 ) {
-  const gate = await requireAdminApi();
-  if (!gate.ok) return gate.response;
+  const __adminGate = await requireAdminPermission("members.edit", {
+    request,
+    auditModule: "members",
+  });
+  if (!__adminGate.ok) return __adminGate.response;
 
   try {
     const { id } = await context.params;
+    if (!isAdminUuid(id)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid user ID." },
+        { status: 400 },
+      );
+    }
 
     const { data: before } = await gate.supabase
       .from("users")
@@ -343,7 +376,8 @@ export async function DELETE(
 
       return NextResponse.json(
         {
-          error: error.message,
+          ok: false,
+          error: safeErrorMessage(error, "Failed to delete member."),
         },
         {
           status: 500,

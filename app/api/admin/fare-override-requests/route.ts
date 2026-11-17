@@ -1,32 +1,13 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminPermission("fare_overrides.view", {
+    request,
+    auditModule: "fare_overrides",
+  });
+  if (!gate.ok) return gate.response;
 
   const { searchParams } = new URL(request.url);
   const q = (searchParams.get("q") ?? "").trim();
@@ -42,7 +23,7 @@ export async function GET(request: Request) {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  let query = supabaseAdmin
+  let query = gate.supabase
     .from("fare_override_requests")
     .select(
       `
@@ -96,7 +77,10 @@ export async function GET(request: Request) {
   const { data, error, count } = await query;
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to load fare override requests."),
+      },
       { status: 400 },
     );
   }
@@ -108,7 +92,7 @@ export async function GET(request: Request) {
     const ql = q.toLowerCase();
     const needsUserFilter = rows.some(() => true);
     if (needsUserFilter) {
-      const { data: matchedUsers } = await supabaseAdmin
+      const { data: matchedUsers } = await gate.supabase
         .from("users")
         .select("id, first_name, last_name, phone")
         .or(
@@ -118,7 +102,7 @@ export async function GET(request: Request) {
 
       const userIds = new Set((matchedUsers ?? []).map((u) => u.id));
       if (userIds.size > 0) {
-        const { data: extra, error: extraErr } = await supabaseAdmin
+        const { data: extra, error: extraErr } = await gate.supabase
           .from("fare_override_requests")
           .select(
             `

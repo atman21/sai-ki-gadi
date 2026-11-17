@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 import {
   clientMetaFromRequest,
   recordChange,
@@ -23,8 +23,18 @@ export const LUCKY_DRAW_ALLOWED_SLOTS = [
   "21:00",
 ] as const;
 
-async function requireAdmin() {
-  return requireAdminApi();
+async function requireLuckyDrawView(request?: Request) {
+  return requireAdminPermission("lucky_draw.view", {
+    request,
+    auditModule: "lucky_draw",
+  });
+}
+
+async function requireLuckyDrawManage(request?: Request) {
+  return requireAdminPermission("lucky_draw.manage", {
+    request,
+    auditModule: "lucky_draw",
+  });
 }
 
 function normalizeSlots(input: unknown): string[] | null {
@@ -42,8 +52,8 @@ function normalizeSlots(input: unknown): string[] | null {
   return out;
 }
 
-export async function GET() {
-  const auth = await requireAdmin();
+export async function GET(request: Request) {
+  const auth = await requireLuckyDrawView(request);
   if (!auth.ok) return auth.response;
 
   try {
@@ -55,7 +65,13 @@ export async function GET() {
 
     if (error) {
       return NextResponse.json(
-        { ok: false, error: error.message },
+        {
+          ok: false,
+          error: safeErrorMessage(
+            error,
+            "Unable to load lucky draw notification settings.",
+          ),
+        },
         { status: 500 },
       );
     }
@@ -85,7 +101,7 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requireLuckyDrawManage(req);
   if (!auth.ok) return auth.response;
 
   try {
@@ -136,7 +152,13 @@ export async function PUT(req: Request) {
         ...clientMetaFromRequest(req),
       });
       return NextResponse.json(
-        { ok: false, error: error.message },
+        {
+          ok: false,
+          error: safeErrorMessage(
+            error,
+            "Failed to update lucky draw notification settings.",
+          ),
+        },
         { status: 500 },
       );
     }

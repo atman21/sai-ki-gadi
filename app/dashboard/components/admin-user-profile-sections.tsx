@@ -409,7 +409,7 @@ export function AdminUserProfileSections({
         />
         <ProfileField
           label="Date of Birth"
-          value={formatDateOnly(user.birth_date)}
+          value={formatDateOnly(user.birth_date ?? user.date_of_birth)}
         />
         <ProfileField
           label="Aadhaar Number"

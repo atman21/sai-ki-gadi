@@ -1,39 +1,20 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 
 type Context = {
   params: Promise<{ id: string }>;
 };
 
-export async function GET(_request: Request, context: Context) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+export async function GET(request: Request, context: Context) {
+  const gate = await requireAdminPermission("fare_overrides.view", {
+    request,
+    auditModule: "fare_overrides",
+  });
+  if (!gate.ok) return gate.response;
 
   const { id } = await context.params;
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await gate.supabase
     .from("fare_override_requests")
     .select(
       `
@@ -66,7 +47,10 @@ export async function GET(_request: Request, context: Context) {
 
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to load fare override request."),
+      },
       { status: 400 },
     );
   }

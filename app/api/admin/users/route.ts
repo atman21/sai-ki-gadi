@@ -1,10 +1,12 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET() {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("members.view", {
+    auditModule: "members",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {

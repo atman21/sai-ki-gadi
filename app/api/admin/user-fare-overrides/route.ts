@@ -1,32 +1,13 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
-import { hasAdminSession } from "@/lib/admin-session";
-import {
-  serviceRoleConfigIssue,
-  supabaseAdmin,
-  usingServiceRole,
-} from "@/lib/supabase-admin";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  if (!hasAdminSession(cookieStore)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 },
-    );
-  }
-  if (!usingServiceRole) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          serviceRoleConfigIssue() ??
-          "Server-only SUPABASE_SERVICE_ROLE_KEY is required.",
-      },
-      { status: 503 },
-    );
-  }
+  const gate = await requireAdminPermission("fare_overrides.view", {
+    request,
+    auditModule: "fare_overrides",
+  });
+  if (!gate.ok) return gate.response;
 
   const { searchParams } = new URL(request.url);
   const status = (searchParams.get("status") ?? "approved").trim();
@@ -40,7 +21,7 @@ export async function GET(request: Request) {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  let query = supabaseAdmin
+  let query = gate.supabase
     .from("user_fare_overrides")
     .select(
       `
@@ -90,7 +71,10 @@ export async function GET(request: Request) {
   const { data, error, count } = await query;
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Unable to load fare overrides."),
+      },
       { status: 400 },
     );
   }
@@ -98,7 +82,7 @@ export async function GET(request: Request) {
   const rows = data ?? [];
 
   // One query for active rules; match in memory (avoids N+1 RPCs).
-  const { data: rules } = await supabaseAdmin
+  const { data: rules } = await gate.supabase
     .from("route_minimum_fares")
     .select(
       "from_city, from_state, to_city, to_state, vehicle_category, minimum_fare",

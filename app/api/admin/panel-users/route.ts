@@ -82,6 +82,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // Match PATCH: role assignment requires permissions.assign (or Super Admin).
+  // Deny before insert so a forbidden roleIds payload cannot leave an orphan user.
+  if (roleIds.length > 0) {
+    const canAssign =
+      gate.actor.isSuperAdmin ||
+      gate.actor.permissions.has("permissions.assign");
+    if (!canAssign) {
+      return NextResponse.json(
+        { ok: false, error: "Forbidden — cannot assign roles." },
+        { status: 403 },
+      );
+    }
+  }
+
   const { data: created, error } = await gate.supabase
     .from("admin_panel_users")
     .insert({

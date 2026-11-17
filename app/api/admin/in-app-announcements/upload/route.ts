@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 
 import {
-  requireAdminApi,
+  requireAdminPermission,
   safeErrorMessage,
 } from "@/lib/in-app-announcements/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
@@ -28,7 +28,10 @@ const ALLOWED_AUDIO = new Set([
 ]);
 
 export async function POST(request: Request) {
-  const auth = await requireAdminApi();
+  const auth = await requireAdminPermission("announcements.manage", {
+    request,
+    auditModule: "announcements",
+  });
   if (!auth.ok) return auth.response;
 
   try {

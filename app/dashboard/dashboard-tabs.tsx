@@ -31,11 +31,23 @@ import { useAdminAccessOptional } from "@/components/admin/admin-access-provider
 import { AdminRolesPanel } from "@/components/admin/admin-roles-panel";
 import { AdminUsersPanel } from "@/components/admin/admin-users-panel";
 import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
-import { FareOverrideRequestsPanel } from "@/components/admin/fare-override-requests-panel";
 import { MemberReviewsPanel } from "@/components/admin/member-reviews-panel";
+import { AiManagementAccessGate } from "@/components/admin/ai-management-access-gate";
 import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { getMembershipLifecycleStatus } from "@/lib/admin-membership-status";
 import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
+import {
+  AI_MANAGEMENT_NAV_GROUP_TITLE,
+  AI_MANAGEMENT_NAV_ITEMS,
+  AI_MANAGEMENT_TAB_KEYS,
+  isAiManagementNavGroupTitle,
+  isAiManagementTabKey,
+} from "@/lib/ai-management-nav";
+import {
+  formatListingFareForDisplay,
+  formatListingFareForExport,
+} from "@/lib/dashboard-listing-fare-display";
+import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { VEHICLE_CATEGORIES } from "@/lib/vehicle-categories";
 import { AdminNavIcon } from "./admin-nav-icons";
@@ -108,7 +120,8 @@ const LUCKY_DRAW_SLOT_OPTIONS: { value: string; label: string }[] = [
 
 type WinnersUser = {
   id: string;
-  user_id: string;
+  /** Null for intentional text-only winners; set only when explicitly linked. */
+  user_id: string | null;
   date: string;
   slot: string;
   image: string | null;
@@ -221,7 +234,8 @@ type Requirement = {
   destination_state: string;
   car_type: string;
   trip_type: string;
-  price: string;
+  /** Present only when SSR loaded with listings.fare_view. */
+  price?: string | number | null;
   journey_start_at: string;
   ride_type: string;
   created_at: string;
@@ -263,6 +277,9 @@ type Exchange = {
   created_at: string;
 
   booked: boolean;
+
+  /** Present only when SSR loaded with listings.fare_view. */
+  price?: string | number | null;
 
   users: {
     first_name: string;
@@ -402,6 +419,8 @@ type DashboardTabsProps = {
   users: AppUser[];
   requirements: Requirement[];
   exchanges: Exchange[];
+  /** Server-resolved listings.fare_view (do not rely on client hide alone). */
+  canViewListingFares?: boolean;
   fraudReports: FraudReport[];
   prioritySettings: PrioritySettings;
   luckyDrawNotificationSettings: LuckyDrawNotificationSettings;
@@ -431,9 +450,6 @@ type TabKey =
   | "exchanges"
   | "fraud-reports"
   | "member-reviews"
-  | "disputed-numbers"
-  | "help-center"
-  | "help-ai"
   | "priority-settings"
   | "profile-changes"
   | "car-verification"
@@ -446,7 +462,8 @@ type TabKey =
   | "membership-management"
   | "admin-users"
   | "admin-roles"
-  | "audit-logs";
+  | "audit-logs"
+  | (typeof AI_MANAGEMENT_TAB_KEYS)[number];
 
 const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "overview",
@@ -462,9 +479,6 @@ const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "exchanges",
   "fraud-reports",
   "member-reviews",
-  "disputed-numbers",
-  "help-center",
-  "help-ai",
   "priority-settings",
   "profile-changes",
   "car-verification",
@@ -478,6 +492,7 @@ const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "admin-users",
   "admin-roles",
   "audit-logs",
+  ...AI_MANAGEMENT_TAB_KEYS,
 ]);
 
 function parseTabKey(value: string | null | undefined): TabKey {
@@ -536,6 +551,7 @@ type BirthdaySortKey = "dob_oldest" | "dob_newest";
 type BirthdayPresetFilter = "all" | "today" | "this_month" | "not_set";
 
 const BIRTHDAY_PAGE_SIZE = 50;
+const USERS_PAGE_SIZE = 50;
 
 /** Parse signup DOB (`users.birth_date`) as a local calendar date for sorting/filters. */
 function parseBirthDateValue(value: string | null | undefined): Date | null {
@@ -588,6 +604,7 @@ export function DashboardTabs({
   users,
   requirements,
   exchanges,
+  canViewListingFares: canViewListingFaresProp = false,
   fraudReports,
   prioritySettings,
   luckyDrawNotificationSettings,
@@ -605,6 +622,19 @@ export function DashboardTabs({
   const router = useRouter();
   const searchParams = useSearchParams();
   const adminAccess = useAdminAccessOptional();
+  const canManageFraud = Boolean(
+    adminAccess &&
+      !adminAccess.loading &&
+      adminAccess.me &&
+      adminAccess.can("fraud.manage"),
+  );
+  // Prefer server SSR gate; once /api/admin/me loads, AND with client permission (never OR).
+  const canViewListingFares =
+    canViewListingFaresProp &&
+    (!adminAccess ||
+      adminAccess.loading ||
+      !adminAccess.me ||
+      adminAccess.can("listings.fare_view"));
   const [activeTab, setActiveTab] = useState<TabKey>(() =>
     parseTabKey(searchParams.get("tab")),
   );
@@ -758,6 +788,7 @@ export function DashboardTabs({
   const [birthdaySort, setBirthdaySort] =
     useState<BirthdaySortKey>("dob_oldest");
   const [birthdayPage, setBirthdayPage] = useState(1);
+  const [usersPage, setUsersPage] = useState(1);
   const [remarksDrafts, setRemarksDrafts] = useState<Record<string, string>>(
     {},
   );
@@ -780,19 +811,8 @@ export function DashboardTabs({
 
   const [showWinnerModal, setShowWinnerModal] = useState(false);
 
-  const [winnerUsers, setWinnerUsers] = useState<PendingVerificationUser[]>([]);
-
-  const [selectedUserId, setSelectedUserId] = useState("");
-
   const [winnerDate, setWinnerDate] = useState("");
   const [winnerText, setWinnerText] = useState("");
-
-  const [winnerSlot, setWinnerSlot] = useState("");
-
-  const [winnerImage, setWinnerImage] = useState("");
-
-  const [winnerMediaType, setWinnerMediaType] =
-    useState<WinnerMediaType>("image");
 
   const [savingWinner, setSavingWinner] = useState(false);
 
@@ -837,6 +857,7 @@ export function DashboardTabs({
     setLiveFareStats(fareStats);
   }, [fareStats]);
 
+  // Mount-once refresh; SSR already provides fareStats. Avoid refetch on every tab change.
   useEffect(() => {
     let cancelled = false;
     const refreshStats = async () => {
@@ -857,7 +878,7 @@ export function DashboardTabs({
     return () => {
       cancelled = true;
     };
-  }, [activeTab]);
+  }, []);
 
   // Realtime pending fare request count
   useEffect(() => {
@@ -1523,6 +1544,28 @@ export function DashboardTabs({
     userSort,
   ]);
 
+  const usersTotalPages = Math.max(
+    1,
+    Math.ceil(filteredUsers.length / USERS_PAGE_SIZE),
+  );
+  const usersPageSafe = Math.min(usersPage, usersTotalPages);
+  const paginatedUsers = useMemo(() => {
+    const start = (usersPageSafe - 1) * USERS_PAGE_SIZE;
+    return filteredUsers.slice(start, start + USERS_PAGE_SIZE);
+  }, [filteredUsers, usersPageSafe]);
+
+  useEffect(() => {
+    setUsersPage(1);
+  }, [
+    userSearch,
+    userMembership,
+    userVerification,
+    userStatusFilter,
+    userFromDate,
+    userToDate,
+    userSort,
+  ]);
+
   const filteredBirthdayUsers = useMemo(() => {
     const search = birthdaySearch.trim().toLowerCase();
     const today = new Date();
@@ -2042,10 +2085,6 @@ export function DashboardTabs({
             label: "Member Reviews",
           },
           {
-            key: "disputed-numbers" as TabKey,
-            label: "Disputed Numbers",
-          },
-          {
             key: "rejected-partial" as TabKey,
             label: "Rejected/Partial",
             count: rejectedPartialCount,
@@ -2108,9 +2147,14 @@ export function DashboardTabs({
           },
           { key: "in-app-popups" as TabKey, label: "In-App Pop-ups" },
           { key: "birthday-date" as TabKey, label: "Birthday" },
-          { key: "help-center" as TabKey, label: "Help Center" },
-          { key: "help-ai" as TabKey, label: "Help AI Voice" },
         ],
+      },
+      {
+        title: AI_MANAGEMENT_NAV_GROUP_TITLE,
+        items: AI_MANAGEMENT_NAV_ITEMS.map((item) => ({
+          key: item.key as TabKey,
+          label: item.label,
+        })),
       },
       {
         title: "Administration",
@@ -2140,17 +2184,29 @@ export function DashboardTabs({
   );
 
   const filteredNavGroups = useMemo(() => {
-    // Until /api/admin/me loads (or provider missing), show full nav to avoid flash-lockout.
-    if (!adminAccess || adminAccess.loading || !adminAccess.me) {
-      return navGroups;
+    const permissionsReady = Boolean(
+      adminAccess && !adminAccess.loading && adminAccess.me,
+    );
+
+    // Until /api/admin/me loads (or provider missing), keep non-AI nav visible
+    // to avoid flash-lockout, but never reveal AI Management items.
+    if (!permissionsReady) {
+      return navGroups
+        .map((section) =>
+          isAiManagementNavGroupTitle(section.title)
+            ? { ...section, items: [] }
+            : section,
+        )
+        .filter((section) => section.items.length > 0);
     }
+
     return navGroups
       .map((section) => ({
         ...section,
         items: section.items.filter((item) => {
           const required = TAB_PERMISSION_MAP[item.key];
           if (!required) return true;
-          return adminAccess.can(required);
+          return adminAccess!.can(required);
         }),
       }))
       .filter((section) => section.items.length > 0);
@@ -2170,22 +2226,6 @@ export function DashboardTabs({
     router.replace("/");
     router.refresh();
   };
-
-  useEffect(() => {
-    const loadUsers = async () => {
-      try {
-        const response = await fetch("/api/admin/users");
-
-        const data = await response.json();
-
-        setWinnerUsers(data.users ?? []);
-      } catch (error) {
-        console.error(error);
-      }
-    };
-
-    loadUsers();
-  }, []);
 
   const createWinner = async () => {
     try {
@@ -2232,12 +2272,8 @@ export function DashboardTabs({
 
       setShowWinnerModal(false);
 
-      setSelectedUserId("");
       setWinnerDate("");
       setWinnerText("");
-      setWinnerSlot("");
-      setWinnerImage("");
-      setWinnerMediaType("image");
       setEditingWinnerId(null);
 
       router.refresh();
@@ -2473,7 +2509,7 @@ export function DashboardTabs({
         Email: cellDash(user.email),
         Plan: user.membership_type ?? "regular",
         "Date of Birth": formatBirthDateCell(
-          dobOverrides[user.id] ?? user.birth_date,
+          dobOverrides[user.id] ?? user.birth_date ?? user.date_of_birth,
         ),
         "Blood Group": cellDash(user.blood_group),
         "Reference 1 Name": cellDash(user.reference_1_name),
@@ -2547,10 +2583,7 @@ export function DashboardTabs({
           Destination: cellDash(destination),
           "Car Type": cellDash(item.car_type),
           "Trip Type": cellDash(item.trip_type),
-          Fare:
-            item.price != null && String(item.price).trim() !== ""
-              ? item.price
-              : "-",
+          Fare: formatListingFareForExport(item.price, canViewListingFares),
           "Journey Start": item.journey_start_at
             ? formatDateTime(item.journey_start_at)
             : "-",
@@ -3840,198 +3873,158 @@ export function DashboardTabs({
                   className="h-11 rounded-lg border border-slate-300 px-4 text-slate-900"
                 />
 
-                <button
-                  onClick={() => {
-                    setUserSearch("");
-                    setUserMembership("all");
-                    setUserVerification("all");
-                    setUserStatusFilter("all");
-                    setUserFromDate("");
-                    setUserToDate("");
-                    setUserSort("created_newest");
-                  }}
-                  className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-white"
-                >
-                  Reset
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  setUserSearch("");
+                  setUserMembership("all");
+                  setUserVerification("all");
+                  setUserStatusFilter("all");
+                  setUserFromDate("");
+                  setUserToDate("");
+                  setUserSort("created_newest");
+                }}
+                className="h-11 whitespace-nowrap rounded-lg bg-red-500 px-4 text-white"
+              >
+                Reset
+              </button>
             </div>
-            <div className="admin-table-wrap">
-              <div className="overflow-x-auto">
-                <table className="admin-table">
-                  <thead className="bg-slate-50">
+          </div>
+          <div className="admin-table-wrap">
+            <div className="overflow-x-auto">
+              <table className="admin-table">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      User
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Phone
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Email
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Plan
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Date of Birth
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Blood Group
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Reference 1 Name
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Reference 1 Mobile
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Reference 2 Name
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Reference 2 Mobile
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      User Roles
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Created At
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Last Active
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Welcome Completed
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Admin Remarks
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Total Requirements
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Total Exchange Listings
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Total Cab Available Listings
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Total Driver Listings
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Total Posts
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trips Assigned By User</th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trips Assigned To User</th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">Trip Points</th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Membership Status
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Membership History
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Rating
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Membership Start
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Membership End
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Verification
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Account Status
+                    </th>
+                    <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {paginatedUsers.length === 0 ? (
                     <tr>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        User
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Phone
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Email
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Plan
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Date of Birth
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Blood Group
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Reference 1 Name
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Reference 1 Mobile
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Reference 2 Name
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Reference 2 Mobile
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        User Roles
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Created At
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Last Active
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Welcome Completed
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Admin Remarks
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Total Requirements
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Total Exchange Listings
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Total Cab Available Listings
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Total Driver Listings
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Total Posts
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Trips Assigned By User
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Trips Assigned To User
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Trip Points
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Membership Status
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Membership History
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Rating
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Membership Start
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Membership End
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Verification
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Account Status
-                      </th>
-                      <th className="whitespace-nowrap px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Actions
-                      </th>
+                      <td
+                        className="px-4 py-10 text-center text-slate-500"
+                        colSpan={32}
+                      >
+                        No users found.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredUsers.length === 0 ? (
-                      <tr>
-                        <td
-                          className="px-4 py-10 text-center text-slate-500"
-                          colSpan={32}
-                        >
-                          No users found.
+                  ) : (
+                    paginatedUsers.map((user) => (
+                      <tr
+                        key={user.id}
+                        onClick={() =>
+                          router.push(`/dashboard/users/${user.id}?tab=users`)
+                        }
+                        className={`cursor-pointer hover:bg-slate-50 transition-all ${
+                          updatingUserId === user.id
+                            ? "opacity-50 pointer-events-none"
+                            : ""
+                        }`}
+                      >
+                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                          {user.first_name ?? "-"} {user.last_name ?? "-"}
                         </td>
-                      </tr>
-                    ) : (
-                      filteredUsers.map((user) => (
-                        <tr
-                          key={user.id}
-                          onClick={() =>
-                            router.push(`/dashboard/users/${user.id}?tab=users`)
-                          }
-                          className={`cursor-pointer hover:bg-slate-50 transition-all ${
-                            updatingUserId === user.id
-                              ? "opacity-50 pointer-events-none"
-                              : ""
-                          }`}
+                        <td
+                          className="whitespace-nowrap px-4 py-3 text-slate-600"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                            {user.first_name ?? "-"} {user.last_name ?? "-"}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                            {cellDash(user.phone)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                            {cellDash(user.email)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3">
-                            <div onClick={(e) => e.stopPropagation()}>
-                              {(() => {
-                                const isActiveGold =
-                                  user.membership_type === "gold" &&
-                                  !!user.membership_expires_at &&
-                                  new Date(
-                                    user.membership_expires_at,
-                                  ).getTime() > Date.now();
-                                const downgradeBlock =
-                                  getManualGoldDowngradeBlockReason(user);
-                                const allowRegularOption = !downgradeBlock;
-                                // Always show Gold when the user is already Gold
-                                // (renew / locked display). Convert from Regular
-                                // still requires convert permission.
-                                const allowGoldOption =
-                                  user.membership_type === "gold" ||
-                                  canConvertRegularToGold;
-                                const selectDisabled =
-                                  !canManageMembership &&
-                                  !canConvertRegularToGold;
-                                const lockedValue =
-                                  user.membership_type === "gold" &&
-                                  !allowRegularOption
-                                    ? "gold"
-                                    : isActiveGold
-                                      ? "gold"
-                                      : "regular";
-                                return (
-                              <select
-                                key={`${user.id}-${lockedValue}-${allowRegularOption}-${allowGoldOption}`}
-                                defaultValue={lockedValue}
-                                disabled={selectDisabled}
-                                title={
-                                  downgradeBlock
-                                    ? downgradeBlock
-                                    : !allowGoldOption
-                                      ? "Convert to Gold requires members.convert_regular_to_gold"
-                                      : undefined
-                                }
-                                className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                onChange={(e) => {
-                                  const type = e.target.value;
-                                  const el = e.target;
+                          <PhoneNumberAction phone={user.phone} emptyLabel="-" />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                          {cellDash(user.email)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <select
+                              defaultValue={user.membership_type === "gold" && user.membership_expires_at && new Date(user.membership_expires_at).getTime()>Date.now() ? "gold" : "regular"}
+                              className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-800"
+                              onChange={(e) => {
+                                const type = e.target.value;
 
                                   if (type === "gold") {
                                     if (!allowGoldOption) {
@@ -4060,340 +4053,326 @@ export function DashboardTabs({
                                       return;
                                     }
 
-                                    const amountText = prompt(
-                                      "Amount received in ₹ (leave empty if unknown)",
-                                      "",
-                                    );
-                                    if (amountText === null) {
-                                      el.value = lockedValue;
-                                      return;
-                                    }
-                                    const amount = amountText.trim()
-                                      ? Number(amountText)
-                                      : null;
-                                    if (
-                                      amount !== null &&
-                                      (!Number.isFinite(amount) || amount < 0)
-                                    ) {
-                                      alert("Invalid amount");
-                                      el.value = lockedValue;
-                                      return;
-                                    }
-                                    const reference = prompt(
-                                      "Payment reference / UTR (optional)",
-                                      "",
-                                    );
-                                    if (reference === null) {
-                                      el.value = lockedValue;
-                                      return;
-                                    }
-                                    updateMembership(
-                                      user.id,
-                                      "gold",
-                                      duration,
-                                      amount,
-                                      reference,
-                                    );
-                                  } else {
-                                    if (downgradeBlock) {
-                                      el.value = lockedValue;
-                                      alert(downgradeBlock);
-                                      return;
-                                    }
-                                    if (!canManageMembership) {
-                                      el.value = lockedValue;
-                                      alert(
-                                        "You do not have permission to manage memberships.",
-                                      );
-                                      return;
-                                    }
-                                    updateMembership(user.id, "regular");
-                                  }
-                                }}
-                              >
-                                {allowRegularOption ? (
-                                  <option value="regular">Regular</option>
-                                ) : null}
-                                {allowGoldOption ? (
-                                  <option value="gold">Gold</option>
-                                ) : null}
-                              </select>
-                                );
-                              })()}
-                            </div>
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {formatBirthDateCell(
-                              dobOverrides[user.id] ?? user.birth_date,
-                            )}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {cellDash(user.blood_group)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {cellDash(user.reference_1_name)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {cellDash(user.reference_1_mobile)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {cellDash(user.reference_2_name)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {cellDash(user.reference_2_mobile)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {formatUserRolesCell(user.user_roles)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {formatDateTime(user.created_at)}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {formatDateTime(user.last_active_at)}
-                          </td>
-                          <td
-                            className="whitespace-nowrap px-4 py-3 text-center"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              disabled={updatingUserId === user.id}
-                              onClick={() =>
-                                updateWelcome(
-                                  user.id,
-                                  !Boolean(user.welcome_completed),
-                                )
-                              }
-                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
-                                user.welcome_completed
-                                  ? "bg-emerald-500"
-                                  : "bg-slate-300"
-                              }`}
-                              title={
-                                user.welcome_completed
-                                  ? "Welcome completed"
-                                  : "Welcome pending"
-                              }
-                            >
-                              <span
-                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
-                                  user.welcome_completed
-                                    ? "translate-x-6"
-                                    : "translate-x-1"
-                                }`}
-                              />
-                            </button>
-                          </td>
-                          <td
-                            className="min-w-[180px] px-4 py-3"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <input
-                              type="text"
-                              value={
-                                remarksDrafts[user.id] ??
-                                user.admin_remarks ??
-                                ""
-                              }
-                              disabled={updatingUserId === user.id}
-                              onChange={(e) =>
-                                setRemarksDrafts((prev) => ({
-                                  ...prev,
-                                  [user.id]: e.target.value,
-                                }))
-                              }
-                              onBlur={(e) =>
-                                updateRemarks(user.id, e.target.value)
-                              }
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.currentTarget.blur();
+                                  const amountText = prompt("Amount received in ₹ (leave empty if unknown)", "");
+                                  if (amountText === null) return;
+                                  const amount = amountText.trim() ? Number(amountText) : null;
+                                  if (amount !== null && (!Number.isFinite(amount) || amount < 0)) { alert("Invalid amount"); return; }
+                                  const reference = prompt("Payment reference / UTR (optional)", "");
+                                  if (reference === null) return;
+                                  updateMembership(user.id, "gold", duration, amount, reference);
+                                } else {
+                                  updateMembership(user.id, "regular");
                                 }
                               }}
-                              placeholder="Add remarks..."
-                              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-800"
-                            />
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                            {user.requirement_count ?? 0}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                            {user.exchange_count ?? 0}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                            {user.availability_count ?? 0}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                            {user.driver_requirement_count ?? 0}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                            {user.total_posts ?? 0}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                            {user.trips_assigned_by ?? 0}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                            {user.trips_assigned_to ?? 0}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                            {user.trip_points ?? 0}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center">
-                            {(() => {
-                              const status = getMembershipStatus(user);
-                              return (
-                                <span
-                                  className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                                    status === "Active"
-                                      ? "bg-emerald-100 text-emerald-700"
-                                      : status === "Expired"
-                                        ? "bg-red-100 text-red-700"
-                                        : "bg-slate-100 text-slate-600"
-                                  }`}
-                                >
-                                  {status}
-                                </span>
-                              );
-                            })()}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center">
-                            <button
-                              type="button"
-                              className="admin-btn admin-btn-secondary"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void showMembershipHistory(user);
-                              }}
                             >
-                              View
-                            </button>
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
-                            {user.rating_average != null
-                              ? Number(user.rating_average).toFixed(2)
-                              : "—"}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                            {user.membership_started_at
-                              ? new Date(
-                                  user.membership_started_at,
-                                ).toLocaleDateString()
-                              : "-"}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                            {user.membership_expires_at
-                              ? new Date(
-                                  user.membership_expires_at,
-                                ).toLocaleDateString()
-                              : "-"}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3">
+                              <option value="regular">Regular</option>
+                              <option value="gold">Gold</option>
+                            </select>
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                          {formatBirthDateCell(
+                            dobOverrides[user.id] ??
+                              user.birth_date ??
+                              user.date_of_birth,
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                          {cellDash(user.blood_group)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                          {cellDash(user.reference_1_name)}
+                        </td>
+                        <td
+                          className="whitespace-nowrap px-4 py-3 text-slate-700"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <PhoneNumberAction
+                            phone={user.reference_1_mobile}
+                            emptyLabel="-"
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                          {cellDash(user.reference_2_name)}
+                        </td>
+                        <td
+                          className="whitespace-nowrap px-4 py-3 text-slate-700"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <PhoneNumberAction
+                            phone={user.reference_2_mobile}
+                            emptyLabel="-"
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                          {formatUserRolesCell(user.user_roles)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                          {formatDateTime(user.created_at)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                          {formatDateTime(user.last_active_at)}
+                        </td>
+                        <td
+                          className="whitespace-nowrap px-4 py-3 text-center"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            disabled={updatingUserId === user.id}
+                            onClick={() =>
+                              updateWelcome(
+                                user.id,
+                                !Boolean(user.welcome_completed),
+                              )
+                            }
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                              user.welcome_completed
+                                ? "bg-emerald-500"
+                                : "bg-slate-300"
+                            }`}
+                            title={
+                              user.welcome_completed
+                                ? "Welcome completed"
+                                : "Welcome pending"
+                            }
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                                user.welcome_completed
+                                  ? "translate-x-6"
+                                  : "translate-x-1"
+                              }`}
+                            />
+                          </button>
+                        </td>
+                        <td
+                          className="min-w-[180px] px-4 py-3"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="text"
+                            value={
+                              remarksDrafts[user.id] ?? user.admin_remarks ?? ""
+                            }
+                            disabled={updatingUserId === user.id}
+                            onChange={(e) =>
+                              setRemarksDrafts((prev) => ({
+                                ...prev,
+                                [user.id]: e.target.value,
+                              }))
+                            }
+                            onBlur={(e) =>
+                              updateRemarks(user.id, e.target.value)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.currentTarget.blur();
+                              }
+                            }}
+                            placeholder="Add remarks..."
+                            className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-800"
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                          {user.requirement_count ?? 0}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                          {user.exchange_count ?? 0}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                          {user.availability_count ?? 0}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                          {user.driver_requirement_count ?? 0}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                          {user.total_posts ?? 0}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_by ?? 0}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trips_assigned_to ?? 0}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">{user.trip_points ?? 0}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
+                          {(() => {
+                            const status = getMembershipStatus(user);
+                            return (
+                              <span
+                                className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                                  status === "Active"
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : status === "Expired"
+                                      ? "bg-red-100 text-red-700"
+                                      : "bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                {status}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn-secondary"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void showMembershipHistory(user);
+                            }}
+                          >
+                            View
+                          </button>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-800">
+                          {user.rating_average != null
+                            ? Number(user.rating_average).toFixed(2)
+                            : "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                          {user.membership_started_at
+                            ? new Date(
+                                user.membership_started_at,
+                              ).toLocaleDateString()
+                            : "-"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                          {user.membership_expires_at
+                            ? new Date(
+                                user.membership_expires_at,
+                              ).toLocaleDateString()
+                            : "-"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              user.verified
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-amber-100 text-amber-700"
+                            }`}
+                          >
+                            {user.verified ? "Verified" : "Pending"}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center">
+                          {updatingUserId === user.id ? (
+                            <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
+                              <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
+                              Updating...
+                            </span>
+                          ) : (
                             <span
                               className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                user.verified
+                                user.status
                                   ? "bg-emerald-100 text-emerald-700"
-                                  : "bg-amber-100 text-amber-700"
+                                  : "bg-red-100 text-red-700"
                               }`}
                             >
-                              {user.verified ? "Verified" : "Pending"}
+                              {user.status ? "ON" : "OFF"}
                             </span>
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-center">
-                            {updatingUserId === user.id ? (
-                              <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
-                                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
-                                Updating...
-                              </span>
-                            ) : (
-                              <span
-                                className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                  user.status
-                                    ? "bg-emerald-100 text-emerald-700"
-                                    : "bg-red-100 text-red-700"
-                                }`}
-                              >
-                                {user.status ? "ON" : "OFF"}
-                              </span>
-                            )}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3">
-                            <div
-                              className="flex items-center gap-2"
-                              onClick={(e) => e.stopPropagation()}
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <div
+                            className="flex items-center gap-2"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              disabled={updatingUserId === user.id}
+                              onClick={() =>
+                                toggleUserStatus(user.id, user.status ?? false)
+                              }
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                user.status ? "bg-emerald-500" : "bg-slate-300"
+                              } ${
+                                updatingUserId === user.id
+                                  ? "cursor-not-allowed opacity-70"
+                                  : ""
+                              }`}
                             >
-                              <button
-                                disabled={updatingUserId === user.id}
-                                onClick={() =>
-                                  toggleUserStatus(
-                                    user.id,
-                                    user.status ?? false,
-                                  )
-                                }
-                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
-                                  user.status
-                                    ? "bg-emerald-500"
-                                    : "bg-slate-300"
-                                } ${
-                                  updatingUserId === user.id
-                                    ? "cursor-not-allowed opacity-70"
-                                    : ""
-                                }`}
-                              >
-                                {updatingUserId === user.id ? (
-                                  <span className="mx-auto h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                                ) : (
-                                  <span
-                                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
-                                      user.status
-                                        ? "translate-x-6"
-                                        : "translate-x-1"
-                                    }`}
-                                  />
-                                )}
-                              </button>
+                              {updatingUserId === user.id ? (
+                                <span className="mx-auto h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                              ) : (
+                                <span
+                                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                                    user.status
+                                      ? "translate-x-6"
+                                      : "translate-x-1"
+                                  }`}
+                                />
+                              )}
+                            </button>
 
-                              <button
-                                onClick={() => deleteUser(user.id)}
-                                className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                            <button
+                              onClick={() => deleteUser(user.id)}
+                              className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {filteredUsers.length > USERS_PAGE_SIZE ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-slate-600">
+                Page {usersPageSafe} of {usersTotalPages} · {filteredUsers.length}{" "}
+                users
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={usersPageSafe <= 1}
+                  onClick={() => setUsersPage((page) => Math.max(1, page - 1))}
+                  className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={usersPageSafe >= usersTotalPages}
+                  onClick={() =>
+                    setUsersPage((page) => Math.min(usersTotalPages, page + 1))
+                  }
+                  className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
               </div>
             </div>
-          </>
-        ) : activeTab === "birthday-date" ? (
-          <>
-            <div className="admin-card mb-5 p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="admin-eyebrow">🎂 Birthday Notifications</p>
-                  <h2 className="admin-section-title mt-1">
-                    Push notifications for today&apos;s birthdays
-                  </h2>
-                  <p className="admin-caption mt-1 max-w-2xl">
-                    Automatically notify all app users when someone has a
-                    birthday today. Uses the same FCM channel/sound as Winner
-                    notifications. Asia/Kolkata timezone. In-app birthday popup
-                    is unchanged.
-                  </p>
-                </div>
-                <span
-                  className={`admin-badge ${
-                    birthdayNotifEnabled
-                      ? "admin-badge-success"
-                      : "admin-badge-neutral"
-                  }`}
-                >
-                  {birthdayNotifEnabled ? "● Enabled" : "○ Disabled"}
-                </span>
+          ) : null}
+        </>
+      ) : activeTab === "birthday-date" ? (
+        <>
+          <div className="admin-card mb-5 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="admin-eyebrow">🎂 Birthday Notifications</p>
+                <h2 className="admin-section-title mt-1">
+                  Push notifications for today&apos;s birthdays
+                </h2>
+                <p className="admin-caption mt-1 max-w-2xl">
+                  Sends one collective FCM digest naming today&apos;s birthday
+                  members (Asia/Kolkata). Same channel/sound as Winner
+                  notifications. Delivery requires Edge Function env
+                  BIRTHDAY_PUSH_DELIVERY=staging|enabled on a non-production
+                  project. Mobile shows personal + common list popups separately.
+                </p>
               </div>
+              <span
+                className={`admin-badge ${
+                  birthdayNotifEnabled
+                    ? "admin-badge-success"
+                    : "admin-badge-neutral"
+                }`}
+              >
+                {birthdayNotifEnabled ? "● Enabled" : "○ Disabled"}
+              </span>
+            </div>
 
               <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-[var(--admin-radius-sm)] border border-[var(--admin-border)] bg-[var(--admin-surface-muted)] p-3">
@@ -5055,9 +5034,12 @@ export function DashboardTabs({
                             {item.trip_type}
                           </td>
 
-                          <td className="px-6 py-4 text-slate-700">
-                            ₹{item.price}
-                          </td>
+                        <td className="px-6 py-4 text-slate-700">
+                          {formatListingFareForDisplay(
+                            item.price,
+                            canViewListingFares,
+                          )}
+                        </td>
 
                           <td className="px-6 py-4 text-slate-700">
                             {new Date(item.journey_start_at).toLocaleString()}
@@ -5279,20 +5261,21 @@ export function DashboardTabs({
                           {item.exchanged_user?.phone ?? "-"}
                         </td>
 
-                        <td className="px-6 py-4 text-slate-700">
-                          {new Date(item.created_at).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                      <td className="px-6 py-4 text-slate-700">
+                        {new Date(item.created_at).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </>
-        ) : activeTab === "member-reviews" ? (
-          <MemberReviewsPanel />
-        ) : activeTab === "fraud-reports" ? (
-          <>
+          </div>
+        </>
+      ) : activeTab === "member-reviews" ? (
+        <MemberReviewsPanel />
+      ) : activeTab === "fraud-reports" ? (
+        <>
+          {canManageFraud ? (
             <div className="mb-4 flex justify-end">
               <button
                 onClick={() => {
@@ -5308,6 +5291,7 @@ export function DashboardTabs({
                 Report Fraud
               </button>
             </div>
+          ) : null}
 
             <div className="admin-table-wrap">
               <div className="overflow-x-auto">
@@ -5368,7 +5352,8 @@ export function DashboardTabs({
                             {new Date(item.created_at).toLocaleDateString()}
                           </td>
 
-                          <td className="px-6 py-4">
+                        <td className="px-6 py-4">
+                          {canManageFraud ? (
                             <div className="flex gap-2">
                               <button
                                 onClick={() => {
@@ -5394,21 +5379,24 @@ export function DashboardTabs({
                                 Delete
                               </button>
                             </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
-          </>
-        ) : activeTab === "sliders" ? (
-          <>
-            <div className="mb-4 flex justify-end">
-              <button
-                onClick={() => {
-                  setEditingSliderId(null);
+          </div>
+        </>
+      ) : activeTab === "sliders" ? (
+        <>
+          <div className="mb-4 flex justify-end">
+            <button
+              onClick={() => {
+                setEditingSliderId(null);
 
                   setSliderImage("");
 
@@ -5671,519 +5659,498 @@ export function DashboardTabs({
               </p>
             ) : null}
 
-            <button
-              type="button"
-              onClick={() => void savePrioritySettings()}
-              disabled={savingPrioritySettings}
-              className="mt-6 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {savingPrioritySettings ? "Saving..." : "Save Settings"}
-            </button>
+          <button
+            type="button"
+            onClick={() => void savePrioritySettings()}
+            disabled={savingPrioritySettings}
+            className="mt-6 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {savingPrioritySettings ? "Saving..." : "Save Settings"}
+          </button>
+        </div>
+      ) : activeTab === "profile-changes" ? (
+        <>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-bold text-slate-900">
+              Profile Change Requests
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ["pending", "Pending"],
+                  ["approved", "Approved"],
+                  ["rejected", "Rejected"],
+                  ["all", "All"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setProfileChangeFilter(value)}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                    profileChangeFilter === value
+                      ? "bg-indigo-600 text-white"
+                      : "bg-white text-slate-600 border border-slate-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-        ) : activeTab === "profile-changes" ? (
-          <>
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-bold text-slate-900">
-                Profile Change Requests
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                {(
-                  [
-                    ["pending", "Pending"],
-                    ["approved", "Approved"],
-                    ["rejected", "Rejected"],
-                    ["all", "All"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setProfileChangeFilter(value)}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
-                      profileChangeFilter === value
-                        ? "bg-indigo-600 text-white"
-                        : "bg-white text-slate-600 border border-slate-200"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="admin-table-wrap">
-              <div className="overflow-x-auto">
-                <table className="admin-table">
-                  <thead className="bg-slate-50">
+          <div className="admin-table-wrap">
+            <div className="overflow-x-auto">
+              <table className="admin-table">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      User
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Changes
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Requested
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredProfileChangeRequests.length === 0 ? (
                     <tr>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        User
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Changes
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Requested
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Status
-                      </th>
+                      <td
+                        className="px-4 py-10 text-center text-slate-500"
+                        colSpan={4}
+                      >
+                        No profile change requests in this filter.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredProfileChangeRequests.length === 0 ? (
-                      <tr>
-                        <td
-                          className="px-4 py-10 text-center text-slate-500"
-                          colSpan={4}
+                  ) : (
+                    filteredProfileChangeRequests.map((req) => {
+                      const name =
+                        `${req.users?.first_name ?? ""} ${req.users?.last_name ?? ""}`.trim() ||
+                        req.users?.phone ||
+                        req.user_id;
+                      const changeCount = Array.isArray(req.requested_changes)
+                        ? req.requested_changes.length
+                        : 0;
+                      return (
+                        <tr
+                          key={req.id}
+                          className="cursor-pointer hover:bg-slate-50"
+                          onClick={() =>
+                            router.push(`/dashboard/profile-changes/${req.id}`)
+                          }
                         >
-                          No profile change requests in this filter.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredProfileChangeRequests.map((req) => {
-                        const name =
-                          `${req.users?.first_name ?? ""} ${req.users?.last_name ?? ""}`.trim() ||
-                          req.users?.phone ||
-                          req.user_id;
-                        const changeCount = Array.isArray(req.requested_changes)
-                          ? req.requested_changes.length
-                          : 0;
-                        return (
-                          <tr
-                            key={req.id}
-                            className="cursor-pointer hover:bg-slate-50"
-                            onClick={() =>
-                              router.push(
-                                `/dashboard/profile-changes/${req.id}`,
-                              )
-                            }
-                          >
-                            <td className="px-4 py-3">
-                              <p className="font-semibold text-slate-900">
-                                {name}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                {req.users?.phone || "—"}
-                              </p>
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {changeCount} field
-                              {changeCount === 1 ? "" : "s"}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatDateTime(req.requested_at)}
-                            </td>
-                            <td className="px-4 py-3 capitalize text-slate-700">
-                              {req.status}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        ) : activeTab === "car-verification" ? (
-          <>
-            {vehiclesError ? (
-              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                Failed to load vehicles: {vehiclesError}
-              </div>
-            ) : null}
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-bold text-slate-900">
-                Car Verification
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                {(
-                  [
-                    ["pending", "Pending"],
-                    ["approved", "Approved"],
-                    ["rejected", "Rejected"],
-                    ["all", "All"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setVehicleFilter(value)}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
-                      vehicleFilter === value
-                        ? "bg-indigo-600 text-white"
-                        : "bg-white text-slate-600 border border-slate-200"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="admin-table-wrap">
-              <div className="overflow-x-auto">
-                <table className="admin-table">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        User
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Registration Number
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Owner Name
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Owner Mobile
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Submitted
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Status
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredVehicles.length === 0 ? (
-                      <tr>
-                        <td
-                          className="px-4 py-10 text-center text-slate-500"
-                          colSpan={6}
-                        >
-                          No vehicles in this filter.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredVehicles.map((vehicle) => {
-                        const name =
-                          `${vehicle.users?.first_name ?? ""} ${vehicle.users?.last_name ?? ""}`.trim() ||
-                          vehicle.users?.phone ||
-                          vehicle.user_id;
-                        return (
-                          <tr
-                            key={vehicle.id}
-                            className="cursor-pointer hover:bg-slate-50"
-                            onClick={() =>
-                              router.push(
-                                `/dashboard/car-verification/${vehicle.id}`,
-                              )
-                            }
-                          >
-                            <td className="px-4 py-3">
-                              <p className="font-semibold text-slate-900">
-                                {name}
-                              </p>
-                              <p
-                                className="text-xs text-slate-500"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <PhoneNumberAction
-                                  phone={vehicle.users?.phone}
-                                  emptyLabel="—"
-                                />
-                              </p>
-                            </td>
-                            <td className="px-4 py-3 font-semibold tracking-wide text-slate-800">
-                              {vehicle.registration_number}
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {vehicle.owner_name?.trim() || "Not provided"}
-                            </td>
-                            <td
-                              className="px-4 py-3 text-slate-700"
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-slate-900">
+                              {name}
+                            </p>
+                            <p
+                              className="text-xs text-slate-500"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <PhoneNumberAction
-                                phone={vehicle.owner_mobile_number}
-                                emptyLabel="Not provided"
+                                phone={req.users?.phone}
+                                emptyLabel="—"
                               />
-                            </td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatDateTime(vehicle.created_at)}
-                            </td>
-                            <td className="px-4 py-3 capitalize text-slate-700">
-                              {vehicle.verification_status}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        ) : activeTab === "minimum-fares" ? (
-          <>
-            {routeMinimumFaresError ? (
-              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                Failed to load minimum fares: {routeMinimumFaresError}
-              </div>
-            ) : null}
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">
-                  Set Minimum Fare
-                </h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Directional city+state+vehicle rules. Rajkot → Ahmedabad is
-                  separate from Ahmedabad → Rajkot. Legacy rules without a
-                  vehicle still apply as fallback.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  resetMinimumFareForm();
-                  setShowMinimumFareModal(true);
-                }}
-                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-              >
-                Add Rule
-              </button>
-            </div>
-            <div className="mb-4 grid gap-3 sm:grid-cols-3">
-              <input
-                type="search"
-                placeholder="Search city…"
-                value={minFareFilterQ}
-                onChange={(e) => setMinFareFilterQ(e.target.value)}
-                className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
-              />
-              <select
-                value={minFareFilterVehicle}
-                onChange={(e) => setMinFareFilterVehicle(e.target.value)}
-                className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
-              >
-                <option value="">All vehicles</option>
-                <option value="__legacy__">Legacy (no vehicle)</option>
-                {VEHICLE_CATEGORIES.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={minFareFilterStatus}
-                onChange={(e) => setMinFareFilterStatus(e.target.value)}
-                className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
-              >
-                <option value="all">All statuses</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
-            <div className="admin-table-wrap">
-              <div className="overflow-x-auto">
-                <table className="admin-table">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        From City
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        From State
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        To City
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        To State
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Vehicle Category
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Minimum Fare
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Status
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Created At
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Updated At
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {(() => {
-                      const filtered = routeMinimumFares.filter((rule) => {
-                        if (
-                          minFareFilterStatus === "active" &&
-                          !rule.is_active
-                        ) {
-                          return false;
-                        }
-                        if (
-                          minFareFilterStatus === "inactive" &&
-                          rule.is_active
-                        ) {
-                          return false;
-                        }
-                        if (minFareFilterVehicle === "__legacy__") {
-                          if (rule.vehicle_category) return false;
-                        } else if (minFareFilterVehicle) {
-                          if (rule.vehicle_category !== minFareFilterVehicle) {
-                            return false;
-                          }
-                        }
-                        if (minFareFilterQ.trim()) {
-                          const q = minFareFilterQ.trim().toLowerCase();
-                          const hay =
-                            `${rule.from_city} ${rule.to_city} ${rule.from_state} ${rule.to_state}`.toLowerCase();
-                          if (!hay.includes(q)) return false;
-                        }
-                        return true;
-                      });
-                      if (filtered.length === 0) {
-                        return (
-                          <tr>
-                            <td
-                              className="px-4 py-10 text-center text-slate-500"
-                              colSpan={10}
-                            >
-                              No minimum fare rules match your filters.
-                            </td>
-                          </tr>
-                        );
-                      }
-                      return filtered.map((rule) => (
-                        <tr key={rule.id} className="hover:bg-slate-50">
-                          <td className="px-4 py-3 font-semibold text-slate-800">
-                            {rule.from_city}
+                            </p>
                           </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {rule.from_state}
+                          <td className="px-4 py-3 text-slate-700">
+                            {changeCount} field
+                            {changeCount === 1 ? "" : "s"}
                           </td>
-                          <td className="px-4 py-3 font-semibold text-slate-800">
-                            {rule.to_city}
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatDateTime(req.requested_at)}
                           </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {rule.to_state}
-                          </td>
-                          <td className="px-4 py-3">
-                            {rule.vehicle_category ? (
-                              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
-                                {rule.vehicle_category}
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
-                                Legacy (all)
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-slate-900">
-                            ₹{Number(rule.minimum_fare).toLocaleString("en-IN")}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                rule.is_active
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : "bg-slate-200 text-slate-600"
-                              }`}
-                            >
-                              {rule.is_active ? "Active" : "Inactive"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {formatDateTime(rule.created_at)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {formatDateTime(rule.updated_at)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingMinimumFareId(rule.id);
-                                  setMinFareFromCity(rule.from_city);
-                                  setMinFareFromState(rule.from_state);
-                                  setMinFareToCity(rule.to_city);
-                                  setMinFareToState(rule.to_state);
-                                  setMinFareAmount(String(rule.minimum_fare));
-                                  setMinFareVehicle(
-                                    rule.vehicle_category ?? "",
-                                  );
-                                  setMinFareActive(rule.is_active);
-                                  setShowMinimumFareModal(true);
-                                }}
-                                className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void toggleMinimumFareActive(
-                                    rule.id,
-                                    !rule.is_active,
-                                  )
-                                }
-                                className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200"
-                              >
-                                {rule.is_active ? "Deactivate" : "Activate"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void deleteMinimumFare(rule.id)}
-                                className="rounded-lg bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-200"
-                              >
-                                Delete
-                              </button>
-                            </div>
+                          <td className="px-4 py-3 capitalize text-slate-700">
+                            {req.status}
                           </td>
                         </tr>
-                      ));
-                    })()}
-                  </tbody>
-                </table>
-              </div>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
-          </>
-        ) : activeTab === "fare-override-requests" ? (
-          <FareOverrideRequestsPanel />
-        ) : activeTab === "active-fare-overrides" ? (
-          <ActiveFareOverridesPanel />
-        ) : activeTab === "admin-users" ? (
-          <AdminUsersPanel />
-        ) : activeTab === "admin-roles" ? (
-          <AdminRolesPanel />
-        ) : activeTab === "audit-logs" ? (
-          <AuditLogsPanel />
-        ) : activeTab === "about-us" ? (
-          <AboutUsAdminPanel />
-        ) : activeTab === "disputed-numbers" ? (
-          <DisputedNumbersPanel />
-        ) : activeTab === "help-center" ? (
-          <HelpCenterPanel />
-        ) : activeTab === "help-ai" ? (
-          <HelpAiPanel />
-        ) : activeTab === "wallet-management" ? (
-          <WalletManagementPanel />
-        ) : activeTab === "membership-management" ? (
-          <MembershipManagementPanel />
-        ) : activeTab === "in-app-popups" ? (
-          <InAppAnnouncementsAdminPanel />
-        ) : activeTab === "winners" ? (
-          <>
-            <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          </div>
+        </>
+      ) : activeTab === "car-verification" ? (
+        <>
+          {vehiclesError ? (
+            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              Failed to load vehicles: {vehiclesError}
+            </div>
+          ) : null}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-bold text-slate-900">
+              Car Verification
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ["pending", "Pending"],
+                  ["approved", "Approved"],
+                  ["rejected", "Rejected"],
+                  ["all", "All"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setVehicleFilter(value)}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                    vehicleFilter === value
+                      ? "bg-indigo-600 text-white"
+                      : "bg-white text-slate-600 border border-slate-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="admin-table-wrap">
+            <div className="overflow-x-auto">
+              <table className="admin-table">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      User
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Registration Number
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Submitted
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredVehicles.length === 0 ? (
+                    <tr>
+                      <td
+                        className="px-4 py-10 text-center text-slate-500"
+                        colSpan={4}
+                      >
+                        No vehicles in this filter.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredVehicles.map((vehicle) => {
+                      const name =
+                        `${vehicle.users?.first_name ?? ""} ${vehicle.users?.last_name ?? ""}`.trim() ||
+                        vehicle.users?.phone ||
+                        vehicle.user_id;
+                      return (
+                        <tr
+                          key={vehicle.id}
+                          className="cursor-pointer hover:bg-slate-50"
+                          onClick={() =>
+                            router.push(
+                              `/dashboard/car-verification/${vehicle.id}`,
+                            )
+                          }
+                        >
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-slate-900">
+                              {name}
+                            </p>
+                            <p
+                              className="text-xs text-slate-500"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <PhoneNumberAction
+                                phone={vehicle.users?.phone}
+                                emptyLabel="—"
+                              />
+                            </p>
+                          </td>
+                          <td className="px-4 py-3 font-semibold tracking-wide text-slate-800">
+                            {vehicle.registration_number}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatDateTime(vehicle.created_at)}
+                          </td>
+                          <td className="px-4 py-3 capitalize text-slate-700">
+                            {vehicle.verification_status}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      ) : activeTab === "minimum-fares" ? (
+        <>
+          {routeMinimumFaresError ? (
+            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              Failed to load minimum fares: {routeMinimumFaresError}
+            </div>
+          ) : null}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
               <h2 className="text-lg font-bold text-slate-900">
-                Lucky Draw Notification
+                Set Minimum Fare
               </h2>
               <p className="mt-1 text-sm text-slate-600">
-                Sends FCM with the existing Sai Ki Gadi notification sound when
-                today&apos;s winner exists. Times are Asia/Kolkata. Booking
-                notifications are unchanged.
+                Directional city+state+vehicle rules. Rajkot → Ahmedabad is
+                separate from Ahmedabad → Rajkot. Legacy rules without a vehicle
+                still apply as fallback.
               </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                resetMinimumFareForm();
+                setShowMinimumFareModal(true);
+              }}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+            >
+              Add Rule
+            </button>
+          </div>
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <input
+              type="search"
+              placeholder="Search city…"
+              value={minFareFilterQ}
+              onChange={(e) => setMinFareFilterQ(e.target.value)}
+              className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
+            />
+            <select
+              value={minFareFilterVehicle}
+              onChange={(e) => setMinFareFilterVehicle(e.target.value)}
+              className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
+            >
+              <option value="">All vehicles</option>
+              <option value="__legacy__">Legacy (no vehicle)</option>
+              {VEHICLE_CATEGORIES.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+            <select
+              value={minFareFilterStatus}
+              onChange={(e) => setMinFareFilterStatus(e.target.value)}
+              className="h-10 rounded-xl border border-slate-300 px-3 text-sm"
+            >
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+          <div className="admin-table-wrap">
+            <div className="overflow-x-auto">
+              <table className="admin-table">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      From City
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      From State
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      To City
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      To State
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Vehicle Category
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Minimum Fare
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Created At
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Updated At
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(() => {
+                    const filtered = routeMinimumFares.filter((rule) => {
+                      if (
+                        minFareFilterStatus === "active" &&
+                        !rule.is_active
+                      ) {
+                        return false;
+                      }
+                      if (
+                        minFareFilterStatus === "inactive" &&
+                        rule.is_active
+                      ) {
+                        return false;
+                      }
+                      if (minFareFilterVehicle === "__legacy__") {
+                        if (rule.vehicle_category) return false;
+                      } else if (minFareFilterVehicle) {
+                        if (rule.vehicle_category !== minFareFilterVehicle) {
+                          return false;
+                        }
+                      }
+                      if (minFareFilterQ.trim()) {
+                        const q = minFareFilterQ.trim().toLowerCase();
+                        const hay = `${rule.from_city} ${rule.to_city} ${rule.from_state} ${rule.to_state}`.toLowerCase();
+                        if (!hay.includes(q)) return false;
+                      }
+                      return true;
+                    });
+                    if (filtered.length === 0) {
+                      return (
+                        <tr>
+                          <td
+                            className="px-4 py-10 text-center text-slate-500"
+                            colSpan={10}
+                          >
+                            No minimum fare rules match your filters.
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return filtered.map((rule) => (
+                      <tr key={rule.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-semibold text-slate-800">
+                          {rule.from_city}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {rule.from_state}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-800">
+                          {rule.to_city}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {rule.to_state}
+                        </td>
+                        <td className="px-4 py-3">
+                          {rule.vehicle_category ? (
+                            <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                              {rule.vehicle_category}
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+                              Legacy (all)
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-900">
+                          ₹{Number(rule.minimum_fare).toLocaleString("en-IN")}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              rule.is_active
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-200 text-slate-600"
+                            }`}
+                          >
+                            {rule.is_active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatDateTime(rule.created_at)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatDateTime(rule.updated_at)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingMinimumFareId(rule.id);
+                                setMinFareFromCity(rule.from_city);
+                                setMinFareFromState(rule.from_state);
+                                setMinFareToCity(rule.to_city);
+                                setMinFareToState(rule.to_state);
+                                setMinFareAmount(String(rule.minimum_fare));
+                                setMinFareVehicle(rule.vehicle_category ?? "");
+                                setMinFareActive(rule.is_active);
+                                setShowMinimumFareModal(true);
+                              }}
+                              className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void toggleMinimumFareActive(
+                                  rule.id,
+                                  !rule.is_active,
+                                )
+                              }
+                              className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200"
+                            >
+                              {rule.is_active ? "Deactivate" : "Activate"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void deleteMinimumFare(rule.id)}
+                              className="rounded-lg bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-200"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      ) : activeTab === "fare-override-requests" ? (
+        <FareOverrideRequestsPanel />
+      ) : activeTab === "active-fare-overrides" ? (
+        <ActiveFareOverridesPanel />
+      ) : activeTab === "admin-users" ? (
+        <AdminUsersPanel />
+      ) : activeTab === "admin-roles" ? (
+        <AdminRolesPanel />
+      ) : activeTab === "audit-logs" ? (
+        <AuditLogsPanel />
+      ) : isAiManagementTabKey(activeTab) ? (
+        <AiManagementAccessGate tabKey={activeTab} />
+      ) : activeTab === "about-us" ? (
+        <AboutUsAdminPanel />
+      ) : activeTab === "wallet-management" ? (
+        <WalletManagementPanel />
+      ) : activeTab === "membership-management" ? (
+        <MembershipManagementPanel />
+      ) : activeTab === "in-app-popups" ? (
+        <InAppAnnouncementsAdminPanel />
+      ) : activeTab === "winners" ? (
+        <>
+          <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-900">
+              Lucky Draw Notification
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Sends FCM with the existing Sai Ki Gadi notification sound when
+              today&apos;s winner exists. Times are Asia/Kolkata. Booking
+              notifications are unchanged.
+            </p>
 
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <span className="text-sm font-semibold text-slate-700">
@@ -6267,122 +6234,139 @@ export function DashboardTabs({
               </div>
             </div>
 
-            <div className="mb-4 flex justify-end">
-              <button
-                onClick={() => {
-                  setEditingWinnerId(null);
-
-                  setSelectedUserId("");
-                  setWinnerDate("");
-                  setWinnerText("");
-                  setWinnerSlot("");
-                  setWinnerImage("");
-                  setWinnerMediaType("image");
-
-                  setShowWinnerModal(true);
-                }}
-                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-              >
-                {editingWinnerId ? "Edit Winner" : "Add Winner"}{" "}
-              </button>
-            </div>
-            <div className="admin-table-wrap">
-              <div className="overflow-x-auto">
-                <table className="admin-table">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Date
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Winner Text
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-slate-100">
-                    {winnerUser.length === 0 ? (
-                      <tr>
-                        <td
-                          className="px-4 py-10 text-center text-slate-500"
-                          colSpan={3}
-                        >
-                          No winners found.
-                        </td>
-                      </tr>
-                    ) : (
-                      winnerUser.map((winner) => {
-                        const legacyName = [
-                          winner.users?.first_name,
-                          winner.users?.last_name,
-                        ]
-                          .filter(Boolean)
-                          .join(" ")
-                          .trim();
-                        const displayText =
-                          winner.winner_text?.trim() ||
-                          legacyName ||
-                          "(No winner text)";
-
-                        return (
-                          <tr key={winner.id} className="hover:bg-slate-50">
-                            <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                              {winner.date}
-                            </td>
-                            <td className="min-w-[16rem] px-4 py-3 font-semibold text-slate-800">
-                              <span className="whitespace-pre-wrap">
-                                {displayText}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingWinnerId(winner.id);
-                                    setWinnerDate(winner.date);
-                                    setWinnerText(
-                                      winner.winner_text ?? legacyName,
-                                    );
-                                    setShowWinnerModal(true);
-                                  }}
-                                  className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteWinner(winner.id)}
-                                  className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="admin-card p-6 text-sm text-slate-600">
-            Unknown admin module. Use the sidebar to open a valid tab.
+          <div className="mb-4 flex justify-end">
+            <button
+              onClick={() => {
+                setEditingWinnerId(null);
+                setWinnerDate("");
+                setWinnerText("");
+                setShowWinnerModal(true);
+              }}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+            >
+              {editingWinnerId ? "Edit Winner" : "Add Winner"}{" "}
+            </button>
           </div>
-        )}
-        {showFraudModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-              <div className="mb-5 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-slate-900">
-                  {editingFraudId ? "Edit Fraud Report" : "Report Fraud"}
-                </h2>
+          <div className="admin-table-wrap">
+            <div className="overflow-x-auto">
+              <table className="admin-table">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Date
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Winner ID
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Winner Text
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Link
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100">
+                  {winnerUser.length === 0 ? (
+                    <tr>
+                      <td
+                        className="px-4 py-10 text-center text-slate-500"
+                        colSpan={5}
+                      >
+                        No winners found.
+                      </td>
+                    </tr>
+                  ) : (
+                    winnerUser.map((winner) => {
+                      const legacyName = [
+                        winner.users?.first_name,
+                        winner.users?.last_name,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")
+                        .trim();
+                      const displayText =
+                        winner.winner_text?.trim() ||
+                        legacyName ||
+                        "(No winner text)";
+
+                      return (
+                        <tr key={winner.id} className="hover:bg-slate-50">
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                            {winner.date}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-700">
+                            <button
+                              type="button"
+                              title="Copy winner id for wallet prize lot"
+                              onClick={() => {
+                                void navigator.clipboard?.writeText(winner.id);
+                              }}
+                              className="rounded bg-slate-100 px-2 py-1 hover:bg-slate-200"
+                            >
+                              {winner.id}
+                            </button>
+                          </td>
+                          <td className="min-w-[16rem] px-4 py-3 font-semibold text-slate-800">
+                            <span className="whitespace-pre-wrap">
+                              {displayText}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">
+                            {winner.user_id
+                              ? "Member-linked"
+                              : "Text-only"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingWinnerId(winner.id);
+                                  setWinnerDate(winner.date);
+                                  setWinnerText(
+                                    winner.winner_text ?? legacyName,
+                                  );
+                                  setShowWinnerModal(true);
+                                }}
+                                className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteWinner(winner.id)}
+                                className="rounded-lg bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-200"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="admin-card p-6 text-sm text-slate-600">
+          Unknown admin module. Use the sidebar to open a valid tab.
+        </div>
+      )}
+      {showFraudModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-900">
+                {editingFraudId ? "Edit Fraud Report" : "Report Fraud"}
+              </h2>
 
                 <button
                   onClick={() => setShowFraudModal(false)}
@@ -6441,76 +6425,55 @@ export function DashboardTabs({
                   rows={4}
                 />
 
-                <button
-                  onClick={createFraud}
-                  disabled={savingFraud}
-                  className="w-full rounded-xl bg-red-600 py-3 font-semibold text-white"
-                >
-                  {savingFraud ? "Saving..." : "Save Report"}
-                </button>
-              </div>
+              <button
+                onClick={createFraud}
+                disabled={savingFraud}
+                className="w-full rounded-xl bg-red-600 py-3 font-semibold text-white"
+              >
+                {savingFraud ? "Saving..." : "Save Report"}
+              </button>
             </div>
           </div>
-        )}
-        {showWinnerModal ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-              <div className="mb-5 flex items-center justify-between">
-                <h2 className="text-xl font-bold">
-                  {editingWinnerId ? "Edit Winner" : "Add Winner"}
-                </h2>
-                <button
-                  type="button"
-                  aria-label="Close"
-                  onClick={() => setShowWinnerModal(false)}
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="space-y-5">
-                <label className="block text-sm font-semibold">
-                  Date
-                  <input
-                    type="date"
-                    value={winnerDate}
-                    onChange={(e) => setWinnerDate(e.target.value)}
-                    className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-3"
-                  />
-                </label>
-                <label className="block text-sm font-semibold">
-                  Winner Text
-                  <textarea
-                    rows={8}
-                    maxLength={5000}
-                    value={winnerText}
-                    onChange={(e) => setWinnerText(e.target.value)}
-                    placeholder="Type the winner announcement here. Press Enter for a new line."
-                    className="mt-2 w-full resize-y rounded-lg border border-slate-300 p-3 font-normal whitespace-pre-wrap"
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={savingWinner || !winnerDate || !winnerText.trim()}
-                  onClick={() => void createWinner()}
-                  className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-50"
-                >
-                  {savingWinner
-                    ? "Saving..."
-                    : editingWinnerId
-                      ? "Update Winner"
-                      : "Create Winner"}
-                </button>
-              </div>
+        </div>
+      )}
+      {showWinnerModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="text-xl font-bold">{editingWinnerId ? "Edit Winner" : "Add Winner"}</h2>
+              <button type="button" aria-label="Close" onClick={() => setShowWinnerModal(false)}>✕</button>
+            </div>
+            <div className="space-y-5">
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Text-only winner (no member picker). After create, copy the Winner ID
+                from the list into Wallet → Lucky Draw Prize. Multiple winners may
+                share the same draw date.
+              </p>
+              <label className="block text-sm font-semibold">Date
+                <input type="date" value={winnerDate} onChange={(e) => setWinnerDate(e.target.value)}
+                  className="mt-2 h-12 w-full rounded-lg border border-slate-300 px-3" />
+              </label>
+              <label className="block text-sm font-semibold">Winner Text
+                <textarea rows={8} maxLength={5000} value={winnerText} onChange={(e) => setWinnerText(e.target.value)}
+                  placeholder="Type the winner announcement here. Press Enter for a new line."
+                  className="mt-2 w-full resize-y rounded-lg border border-slate-300 p-3 font-normal whitespace-pre-wrap" />
+              </label>
+              <button type="button" disabled={savingWinner || !winnerDate || !winnerText.trim()}
+                onClick={() => void createWinner()}
+                className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-50">
+                {savingWinner ? "Saving..." : editingWinnerId ? "Update Winner" : "Create Winner"}
+              </button>
             </div>
           </div>
-        ) : null}
-        {showSliderModal ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-              <div className="mb-5 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-slate-900">
-                  {editingSliderId ? "Edit Slider" : "Add Slider"}
-                </h2>
+        </div>
+      ) : null}
+      {showSliderModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-900">
+                {editingSliderId ? "Edit Slider" : "Add Slider"}
+              </h2>
 
                 <button
                   onClick={() => {

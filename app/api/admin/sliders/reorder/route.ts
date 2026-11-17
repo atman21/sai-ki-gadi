@@ -1,10 +1,13 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function PUT(request: Request) {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("sliders.manage", {
+    request,
+    auditModule: "sliders",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {

@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { requireAdminApi } from "@/lib/in-app-announcements/admin-api";
+import { requireAdminPermission } from "@/lib/in-app-announcements/admin-api";
 
 export async function GET() {
-  const auth = await requireAdminApi();
+  const auth = await requireAdminPermission("announcements.view", {
+    auditModule: "announcements",
+  });
   if (!auth.ok) return auth.response;
 
   try {

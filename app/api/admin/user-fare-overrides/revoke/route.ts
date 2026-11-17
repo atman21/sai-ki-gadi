@@ -1,20 +1,31 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/admin-api";
-import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
+import { requireAdminPermission, safeErrorMessage } from "@/lib/admin-api";
+import {
+  clientMetaFromRequest,
+  recordFailure,
+  recordSuccess,
+} from "@/lib/admin-audit";
 
-type Body = {
-  overrideId?: string;
-  reason?: string;
-};
+const OVERRIDE_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: Request) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminPermission("fare_overrides.manage", {
+    request,
+    auditModule: "fare_overrides",
+  });
   if (!gate.ok) return gate.response;
 
-  const body = (await request.json().catch(() => ({}))) as Body;
-  const overrideId = body.overrideId?.trim() ?? "";
-  if (!overrideId) {
+  const rawBody: unknown = await request.json().catch(() => null);
+  const body: Record<string, unknown> =
+    rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+      ? (rawBody as Record<string, unknown>)
+      : {};
+  const overrideId =
+    typeof body.overrideId === "string" ? body.overrideId.trim() : "";
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (!OVERRIDE_ID_RE.test(overrideId)) {
     return NextResponse.json(
       { ok: false, error: "overrideId is required." },
       { status: 400 },
@@ -31,13 +42,16 @@ export async function POST(request: Request) {
       ? ((before as Record<string, unknown>).user_id as string)
       : null;
 
+  const actorLabel =
+    gate.actor.displayName || gate.actor.username || gate.actor.id || "admin";
+
   const { data, error } = await gate.supabase.rpc("revoke_user_fare_override", {
     p_override_id: overrideId,
-    p_revoked_by: "admin",
-    p_reason: body.reason?.trim() || null,
+    p_revoked_by: actorLabel,
+    p_reason: reason || null,
   });
 
-  const revokeReason = body.reason?.trim() || null;
+  const revokeReason = reason || null;
 
   if (error) {
     void recordFailure({
@@ -53,7 +67,10 @@ export async function POST(request: Request) {
       ...clientMetaFromRequest(request),
     });
     return NextResponse.json(
-      { ok: false, error: error.message },
+      {
+        ok: false,
+        error: safeErrorMessage(error, "Failed to revoke fare override."),
+      },
       { status: 400 },
     );
   }
@@ -67,7 +84,9 @@ export async function POST(request: Request) {
     resourceId: overrideId,
     relatedUserId,
     reason: revokeReason,
-    beforeData: before ? { status: (before as Record<string, unknown>).status } : null,
+    beforeData: before
+      ? { status: (before as Record<string, unknown>).status }
+      : null,
     afterData: { status: "revoked" },
     ...clientMetaFromRequest(request),
   });

@@ -1,19 +1,27 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Suspense } from "react";
 
+import { actorCanViewFraudReports } from "@/lib/dashboard-fraud-ssr";
 import {
-    serviceRoleConfigIssue,
-    supabaseAdmin,
-    supabaseProjectHost,
-    usingServiceRole,
-} from "@/lib/supabase-admin";
-import { normalizeIndianMobileForReference } from "@/lib/normalize-indian-mobile";
+  actorCanViewListingFares,
+  exchangeSsrSelect,
+  requirementSsrSelect,
+  stripListingPrice,
+} from "@/lib/dashboard-listing-fare";
+import { actorCanAccess } from "@/lib/dashboard-ssr-permissions";
+import { resolveActorFromSession } from "@/lib/admin-rbac";
+import { getAdminSessionPayload } from "@/lib/admin-session";
+import { supabaseAdmin, usingServiceRole, serviceRoleConfigIssue, supabaseProjectHost } from "@/lib/supabase-admin";
+
+const emptyQuery = <T,>(data: T) =>
+  Promise.resolve({ data, error: null as null });
 
 import {
-    DashboardTabs,
-    type ProfileChangeRequestRow,
-    type RouteMinimumFareRow,
-    type VehicleVerificationRow,
+  DashboardTabs,
+  type ProfileChangeRequestRow,
+  type VehicleVerificationRow,
+  type RouteMinimumFareRow,
 } from "./dashboard-tabs";
 
 export const metadata: Metadata = {
@@ -236,29 +244,6 @@ function hasAnyUploadedDocs(row: IdentityDocRow): boolean {
   );
 }
 
-function hasAadhaarNumber(row: IdentityDocRow): boolean {
-  return Boolean(row.aadhaar_number?.trim());
-}
-
-function hasAllRequiredDocs(row: IdentityDocRow): boolean {
-  const modern =
-    Boolean(row.driving_license_front_path) &&
-    Boolean(row.driving_license_back_path) &&
-    Boolean(row.aadhaar_front_path) &&
-    Boolean(row.aadhaar_back_path);
-  if (modern) return true;
-
-  const legacyFlags =
-    Boolean(row.aadhaar_uploaded) &&
-    Boolean(row.pan_uploaded) &&
-    Boolean(row.gst_uploaded);
-  if (legacyFlags) return true;
-
-  return Boolean(
-    row.aadhaar_file_path && row.pan_file_path && row.gst_file_path,
-  );
-}
-
 function fullNameOf(user: UserRow): string {
   const fromParts = `${user.first_name ?? ""} ${user.last_name ?? ""}`.trim();
   if (fromParts) return fromParts;
@@ -268,6 +253,10 @@ function fullNameOf(user: UserRow): string {
 }
 
 export default async function DashboardPage() {
+  const cookieStore = await cookies();
+  const session = getAdminSessionPayload(cookieStore);
+
+  // Wave 1 member aggregates overlap actor resolution (wave 2 needs the actor).
   const [
     { data: users, error: usersError },
     docsResult,
@@ -277,6 +266,7 @@ export default async function DashboardPage() {
     driverOwnerIds,
     assignedRequirements,
     assignedExchanges,
+    dashboardActor,
   ] = await Promise.all([
     supabaseAdmin
       .from("users")
@@ -305,6 +295,7 @@ export default async function DashboardPage() {
     fetchAllUserIds("driver_listings"),
     fetchAllTripAssignments("requirements", "assigned_to_user_id"),
     fetchAllTripAssignments("exchange_listings", "exchanged_to_user_id"),
+    session ? resolveActorFromSession(session) : Promise.resolve(null),
   ]);
   const { data: docs, error: docsError } = docsResult;
 
@@ -442,7 +433,37 @@ export default async function DashboardPage() {
     ]),
   );
 
-  // Second wave: all independent module datasets in parallel (was sequential).
+  const canViewFraud = actorCanViewFraudReports(dashboardActor);
+  const canViewListingFares = actorCanViewListingFares(dashboardActor);
+  const canViewWinners = actorCanAccess(dashboardActor, "winners.view");
+  const canViewCities = actorCanAccess(dashboardActor, "cities.view");
+  const canViewSliders = actorCanAccess(dashboardActor, "sliders.view");
+  const canViewPriority = actorCanAccess(dashboardActor, "priority.view");
+  const canViewLuckyDraw = actorCanAccess(dashboardActor, "lucky_draw.view");
+  const canViewBirthday = actorCanAccess(dashboardActor, "birthday.view");
+  const canViewRequirements = actorCanAccess(dashboardActor, "requirements.view");
+  const canViewExchanges = actorCanAccess(dashboardActor, "exchanges.view");
+  const canViewProfileChanges = actorCanAccess(
+    dashboardActor,
+    "profile_changes.view",
+  );
+  const canViewVehicles = actorCanAccess(dashboardActor, "vehicles.view");
+  const canViewMinimumFares = actorCanAccess(
+    dashboardActor,
+    "minimum_fares.view",
+  );
+  const canViewFareOverrides = actorCanAccess(
+    dashboardActor,
+    "fare_overrides.view",
+  );
+
+  const skippedCount = {
+    data: null,
+    error: null as null,
+    count: 0,
+  };
+
+  // Second wave: permission-gated datasets + fare head-counts in one round-trip.
   const [
     winnersResult,
     citiesResult,
@@ -456,87 +477,93 @@ export default async function DashboardPage() {
     profileChangeRequestsResult,
     vehiclesResult,
     routeMinimumFaresResult,
+    pendingFareRequestsCountResult,
+    activeRulesCountResult,
+    activeOverridesCountResult,
+    expiredOverridesCountResult,
+    minimumFareRulesTotalResult,
   ] = await Promise.all([
-    supabaseAdmin
-      .from("winners")
-      .select(
-        `
-    *,
+    canViewWinners
+      ? supabaseAdmin
+          .from("winners")
+          .select(
+            `
+    id,
+    date,
+    image,
+    slot,
+    user_id,
+    winner_text,
+    media_type,
+    created_at,
     users (
       first_name,
       last_name,
       phone
     )
   `,
-      )
-      .order("created_at", { ascending: false })
-      .limit(200),
-    supabaseAdmin.from("cities").select("*").order("city", { ascending: true }),
-    supabaseAdmin
-      .from("sliders")
-      .select("*")
-      .order("display_order", { ascending: true })
-      .order("created_at", { ascending: false }),
+          )
+          .order("created_at", { ascending: false })
+          .limit(200)
+      : emptyQuery([] as never[]),
+    canViewCities
+      ? supabaseAdmin
+          .from("cities")
+          .select("id, city, state, district, is_active")
+          .order("city", { ascending: true })
+      : emptyQuery([] as never[]),
+    canViewSliders
+      ? supabaseAdmin
+          .from("sliders")
+          .select("id, image, status, display_order, media_type, created_at")
+          .order("display_order", { ascending: true })
+          .order("created_at", { ascending: false })
+      : emptyQuery([] as never[]),
     // Legacy columns: all_platinum=Diamond, all_gold=Gold, matching_platinum=Silver
-    supabaseAdmin
-      .from("requirement_priority_settings")
-      .select(
-        "matching_platinum_minutes, all_platinum_minutes, all_gold_minutes, updated_at",
-      )
-      .eq("id", 1)
-      .maybeSingle(),
-    supabaseAdmin
-      .from("lucky_draw_notification_settings")
-      .select("id, enabled, slots, updated_at")
-      .eq("id", 1)
-      .maybeSingle(),
-    supabaseAdmin
-      .from("birthday_notification_settings")
-      .select("id, enabled, send_time, updated_at")
-      .eq("id", 1)
-      .maybeSingle(),
-    supabaseAdmin
-      .from("requirements")
-      .select(
-        `
-      *,
-      users!requirements_user_id_fkey (
-        first_name,
-        last_name,
-        phone
-      ),
-      assigned_user:users!requirements_assigned_to_user_id_fkey (
-        first_name,
-        last_name,
-        phone
-      )
-    `,
-      )
-      .order("created_at", { ascending: false })
-      .limit(500),
-    supabaseAdmin
-      .from("exchange_listings")
-      .select(
-        `
-    *,
-    users!exchange_listings_user_id_fkey (
-      first_name,
-      last_name,
-      phone
-    ),
-    exchanged_user:users!exchange_listings_exchanged_to_user_id_fkey (
-      first_name,
-      last_name,
-      phone
-    )
-  `,
-      )
-      .order("created_at", { ascending: false })
-      .limit(500),
-    supabaseAdmin
-      .from("fraud_reports")
-      .select(
-        `
+    canViewPriority
+      ? supabaseAdmin
+          .from("requirement_priority_settings")
+          .select(
+            "matching_platinum_minutes, all_platinum_minutes, all_gold_minutes, updated_at",
+          )
+          .eq("id", 1)
+          .maybeSingle()
+      : emptyQuery(null),
+    canViewLuckyDraw
+      ? supabaseAdmin
+          .from("lucky_draw_notification_settings")
+          .select("id, enabled, slots, updated_at")
+          .eq("id", 1)
+          .maybeSingle()
+      : emptyQuery(null),
+    canViewBirthday
+      ? supabaseAdmin
+          .from("birthday_notification_settings")
+          .select("id, enabled, send_time, updated_at")
+          .eq("id", 1)
+          .maybeSingle()
+      : emptyQuery(null),
+    // Explicit columns: omit price unless listings.fare_view (service_role bypasses RLS).
+    canViewRequirements
+      ? supabaseAdmin
+          .from("requirements")
+          .select(requirementSsrSelect(canViewListingFares))
+          .order("created_at", { ascending: false })
+          .limit(500)
+      : emptyQuery([] as never[]),
+    canViewExchanges
+      ? supabaseAdmin
+          .from("exchange_listings")
+          .select(exchangeSsrSelect(canViewListingFares))
+          .order("created_at", { ascending: false })
+          .limit(500)
+      : emptyQuery([] as never[]),
+    // Do not query fraud_reports unless the actor has fraud.view (SSR props leak otherwise).
+    canViewFraud
+      ? supabaseAdmin
+          .from("fraud_reports")
+          .select(
+            `
     *,
     from_user:users!fraud_reports_from_user_id_fkey (
       first_name,
@@ -549,13 +576,15 @@ export default async function DashboardPage() {
       phone
     )
   `,
-      )
-      .order("created_at", { ascending: false })
-      .limit(300),
-    supabaseAdmin
-      .from("profile_change_requests")
-      .select(
-        `
+          )
+          .order("created_at", { ascending: false })
+          .limit(300)
+      : emptyQuery([] as never[]),
+    canViewProfileChanges
+      ? supabaseAdmin
+          .from("profile_change_requests")
+          .select(
+            `
       id,
       user_id,
       status,
@@ -565,13 +594,15 @@ export default async function DashboardPage() {
       reviewed_at,
       reviewed_by
     `,
-      )
-      .order("requested_at", { ascending: false })
-      .limit(200),
-    supabaseAdmin
-      .from("user_vehicles")
-      .select(
-        `
+          )
+          .order("requested_at", { ascending: false })
+          .limit(200)
+      : emptyQuery([] as never[]),
+    canViewVehicles
+      ? supabaseAdmin
+          .from("user_vehicles")
+          .select(
+            `
       id,
       user_id,
       registration_number,
@@ -584,13 +615,15 @@ export default async function DashboardPage() {
       reviewed_at,
       reviewed_by
     `,
-      )
-      .order("created_at", { ascending: false })
-      .limit(300),
-    supabaseAdmin
-      .from("route_minimum_fares")
-      .select(
-        `
+          )
+          .order("created_at", { ascending: false })
+          .limit(300)
+      : emptyQuery([] as never[]),
+    canViewMinimumFares
+      ? supabaseAdmin
+          .from("route_minimum_fares")
+          .select(
+            `
       id,
       from_city,
       from_state,
@@ -602,9 +635,39 @@ export default async function DashboardPage() {
       created_at,
       updated_at
     `,
-      )
-      .order("updated_at", { ascending: false })
-      .limit(500),
+          )
+          .order("updated_at", { ascending: false })
+          .limit(500)
+      : emptyQuery([] as never[]),
+    canViewFareOverrides
+      ? supabaseAdmin
+          .from("fare_override_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending")
+      : Promise.resolve(skippedCount),
+    canViewMinimumFares
+      ? supabaseAdmin
+          .from("route_minimum_fares")
+          .select("id", { count: "exact", head: true })
+          .eq("is_active", true)
+      : Promise.resolve(skippedCount),
+    canViewFareOverrides
+      ? supabaseAdmin
+          .from("user_fare_overrides")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "approved")
+      : Promise.resolve(skippedCount),
+    canViewFareOverrides
+      ? supabaseAdmin
+          .from("user_fare_overrides")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "expired")
+      : Promise.resolve(skippedCount),
+    canViewMinimumFares
+      ? supabaseAdmin
+          .from("route_minimum_fares")
+          .select("id", { count: "exact", head: true })
+      : Promise.resolve(skippedCount),
   ]);
 
   const winners = winnersResult.data;
@@ -613,9 +676,14 @@ export default async function DashboardPage() {
   const prioritySettingsRow = prioritySettingsResult.data;
   const luckyDrawNotificationSettingsRow = luckyDrawResult.data;
   const birthdayNotificationSettingsRow = birthdayNotifResult.data;
-  const requirements = requirementsResult.data;
-  const exchanges = exchangesResult.data;
-  const fraudReports = fraudReportsResult.data;
+  // Defense-in-depth: never serialize price into client props without permission.
+  const requirements = canViewListingFares
+    ? (requirementsResult.data ?? [])
+    : stripListingPrice(requirementsResult.data);
+  const exchanges = canViewListingFares
+    ? (exchangesResult.data ?? [])
+    : stripListingPrice(exchangesResult.data);
+  const fraudReports = canViewFraud ? fraudReportsResult.data : [];
   const profileChangeRequestRows = profileChangeRequestsResult.data;
   const profileChangeRequestsError = profileChangeRequestsResult.error;
   const vehicleRows = vehiclesResult.data;
@@ -625,7 +693,10 @@ export default async function DashboardPage() {
 
   // Pre-migration fallback: column vehicle_category may not exist yet.
   if (
-    routeMinimumFaresError?.message?.toLowerCase().includes("vehicle_category")
+    canViewMinimumFares &&
+    routeMinimumFaresError?.message
+      ?.toLowerCase()
+      .includes("vehicle_category")
   ) {
     const retry = await supabaseAdmin
       .from("route_minimum_fares")
@@ -647,31 +718,6 @@ export default async function DashboardPage() {
     routeMinimumFareRows = retry.data as typeof routeMinimumFareRows;
     routeMinimumFaresError = retry.error;
   }
-
-  // Fare override tables may not exist until migration 052 is applied.
-  const [
-    pendingFareRequestsCountResult,
-    activeRulesCountResult,
-    activeOverridesCountResult,
-    expiredOverridesCountResult,
-  ] = await Promise.all([
-    supabaseAdmin
-      .from("fare_override_requests")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "pending"),
-    supabaseAdmin
-      .from("route_minimum_fares")
-      .select("id", { count: "exact", head: true })
-      .eq("is_active", true),
-    supabaseAdmin
-      .from("user_fare_overrides")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "approved"),
-    supabaseAdmin
-      .from("user_fare_overrides")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "expired"),
-  ]);
 
   const prioritySettings = {
     matching_platinum_minutes:
@@ -757,7 +803,9 @@ export default async function DashboardPage() {
   }));
 
   const fareStats = {
-    minimumFareRules: routeMinimumFares.length,
+    minimumFareRules: minimumFareRulesTotalResult.error
+      ? routeMinimumFares.length
+      : (minimumFareRulesTotalResult.count ?? routeMinimumFares.length),
     activeRules: activeRulesCountResult.error
       ? routeMinimumFares.filter((r) => r.is_active).length
       : (activeRulesCountResult.count ?? 0),
@@ -780,37 +828,48 @@ export default async function DashboardPage() {
             <div className="h-64 animate-pulse rounded-2xl border border-slate-200 bg-white" />
           }
         >
-          <DashboardTabs
-            totalUsers={allUsers.length}
-            membership={membership}
-            verifiedCount={verifiedCount}
-            unverifiedCount={unverifiedCount}
-            pendingVerificationUsers={pendingVerificationUsers}
-            rejectedPartialUsers={rejectedPartialUsers}
-            notStartedVerificationUsers={notStartedVerificationUsers}
-            showRlsHint={!usingServiceRole}
-            serviceRoleIssue={serviceRoleConfigIssue()}
-            supabaseHost={supabaseProjectHost()}
-            profileChangeRequestsError={
-              profileChangeRequestsError?.message ?? null
-            }
-            vehiclesError={vehiclesError?.message ?? null}
-            routeMinimumFaresError={routeMinimumFaresError?.message ?? null}
-            winnerUser={winners ?? []}
-            cities={cities ?? []}
-            sliders={sliders ?? []}
-            users={allUsers ?? []}
-            requirements={requirements ?? []}
-            exchanges={exchanges ?? []}
-            fraudReports={fraudReports ?? []}
-            prioritySettings={prioritySettings}
-            luckyDrawNotificationSettings={luckyDrawNotificationSettings}
-            birthdayNotificationSettings={birthdayNotificationSettings}
-            profileChangeRequests={profileChangeRequests}
-            vehicles={vehicles}
-            routeMinimumFares={routeMinimumFares}
-            fareStats={fareStats}
-          />
+        <DashboardTabs
+          totalUsers={allUsers.length}
+          membership={membership}
+          verifiedCount={verifiedCount}
+          unverifiedCount={unverifiedCount}
+          pendingVerificationUsers={pendingVerificationUsers}
+          rejectedPartialUsers={rejectedPartialUsers}
+          notStartedVerificationUsers={notStartedVerificationUsers}
+          showRlsHint={!usingServiceRole}
+          serviceRoleIssue={serviceRoleConfigIssue()}
+          supabaseHost={supabaseProjectHost()}
+          profileChangeRequestsError={
+            profileChangeRequestsError?.message ?? null
+          }
+          vehiclesError={vehiclesError?.message ?? null}
+          routeMinimumFaresError={routeMinimumFaresError?.message ?? null}
+          winnerUser={(winners ?? []) as unknown as Parameters<
+            typeof DashboardTabs
+          >[0]["winnerUser"]}
+          cities={(cities ?? []) as unknown as Parameters<
+            typeof DashboardTabs
+          >[0]["cities"]}
+          sliders={(sliders ?? []) as unknown as Parameters<
+            typeof DashboardTabs
+          >[0]["sliders"]}
+          users={allUsers ?? []}
+          requirements={requirements as Parameters<
+            typeof DashboardTabs
+          >[0]["requirements"]}
+          exchanges={exchanges as Parameters<
+            typeof DashboardTabs
+          >[0]["exchanges"]}
+          canViewListingFares={canViewListingFares}
+          fraudReports={fraudReports ?? []}
+          prioritySettings={prioritySettings}
+          luckyDrawNotificationSettings={luckyDrawNotificationSettings}
+          birthdayNotificationSettings={birthdayNotificationSettings}
+          profileChangeRequests={profileChangeRequests}
+          vehicles={vehicles}
+          routeMinimumFares={routeMinimumFares}
+          fareStats={fareStats}
+        />
         </Suspense>
       </main>
     </div>

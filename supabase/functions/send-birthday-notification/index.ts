@@ -1,46 +1,78 @@
+// @ts-nocheck
 /**
- * Birthday FCM blast — SEPARATE from Lucky Draw `send-lucky-draw-notification`
- * and booking `send-fcm-all`. Self-contained for Dashboard paste-deploy.
- * Channel/sound: same as Winner (merigadi-sound-v5 / saikigadi_notification_new).
- * Does NOT modify Winner or booking notification logic.
- * Does NOT touch in-app BirthdayWishPopup.
+ * One combined birthday digest per Asia/Kolkata date.
+ * Separate from Lucky Draw, booking send-fcm-all, and notification_outbox.
  *
- * Runtime: Supabase Edge (Deno). Ambient types live in ./deno-env.d.ts so this
- * file type-checks under the repo ESLint/TS toolchain without @ts-nocheck.
+ * Delivery modes (BIRTHDAY_PUSH_DELIVERY):
+ * - unset → no FCM (safe default)
+ * - staging → allowlisted non-prod project + BIRTHDAY_PUSH_TEST_TOKENS only
+ * - enabled → allowlisted non-prod project + all registered FCM tokens
+ * Live production project uecdmytikvwiosnyndxe is refused unconditionally.
+ * Collective body lists today's birthday names once per Asia/Kolkata date.
+ *
+ * A success digest is not sent again that IST date. A later tick retries
+ * only device hashes that do not already have a success row.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  BIRTHDAY_DIGEST_TITLE,
+  BIRTHDAY_FCM_CHUNK,
+  BIRTHDAY_SCHEDULED_KEY,
+  BIRTHDAY_STALE_PENDING_MS,
+  DIGEST_STATUS_WRITE_ATTEMPTS,
+  decideDigestAttempt,
+  evaluateBirthdayDeliveryGate,
+  formatBirthdayDigestBody,
+  getKolkataClock,
+  isBirthdayFcmToken,
+  isBirthdayOnKolkataDate,
+  isPermanentFcmTokenError,
+  maskPushToken,
+  normalizeSendTime,
+  orderedBirthdayNames,
+  parseTestTokenAllowlist,
+  pendingTokenTargets,
+  restrictToTestAllowlist,
+  selectProductRecipients,
+  summarizeDeliveryAttempt,
+} from "./birthday-notification-schedule.ts";
 
 const LOG = "[BirthdayNotification]";
-const TIMEZONE = "Asia/Kolkata";
-const TITLE = "🎂 Birthday Wishes!";
-const SLOT_WINDOW_MINUTES = 5;
-const STALE_PENDING_MS = 15 * 60 * 1000;
-const MAX_BIRTHDAYS_PER_RUN = 25;
-const SCHEDULED_KEY = "scheduled";
-
 const ANDROID_CHANNEL_ID = "merigadi-sound-v5";
 const ANDROID_SOUND = "saikigadi_notification_new";
 const BIRTHDAY_ROUTE = "/(app)";
+const USER_PAGE = 1000;
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-type SettingsRow = {
-  enabled: boolean;
-  send_time: string | null;
-};
+function json(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
-type BirthdayUser = {
-  id: string;
-  first_name: string | null;
-  last_name: string | null;
-};
+function isAuthorized(req) {
+  if (!serviceRoleKey) return false;
+  const auth = req.headers.get("Authorization") ?? "";
+  return auth === `Bearer ${serviceRoleKey}`;
+}
 
-async function getFirebaseAccessToken(): Promise<string> {
+async function hashToken(token) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(token),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+async function getFirebaseAccessToken() {
   const clientEmail = Deno.env.get("FIREBASE_CLIENT_EMAIL");
   const privateKey = Deno.env.get("FIREBASE_PRIVATE_KEY")?.replace(/\\n/g, "\n");
-
   if (!clientEmail || !privateKey) {
     throw new Error("Missing Firebase service account credentials");
   }
@@ -54,17 +86,14 @@ async function getFirebaseAccessToken(): Promise<string> {
     exp: now + 3600,
     scope: "https://www.googleapis.com/auth/firebase.messaging",
   };
-
   const header = { alg: "RS256", typ: "JWT" };
-  const encode = (obj: object) =>
+  const encode = (obj) =>
     btoa(JSON.stringify(obj)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-
   const signingInput = `${encode(header)}.${encode(payload)}`;
   const keyData = privateKey
     .replace("-----BEGIN PRIVATE KEY-----", "")
     .replace("-----END PRIVATE KEY-----", "")
     .replace(/\s/g, "");
-
   const binaryKey = Uint8Array.from(atob(keyData), (c) => c.charCodeAt(0));
   const cryptoKey = await crypto.subtle.importKey(
     "pkcs8",
@@ -73,58 +102,28 @@ async function getFirebaseAccessToken(): Promise<string> {
     false,
     ["sign"],
   );
-
   const signature = await crypto.subtle.sign(
     "RSASSA-PKCS1-v1_5",
     cryptoKey,
     new TextEncoder().encode(signingInput),
   );
-
   const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
     .replace(/=/g, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
-
-  const jwt = `${signingInput}.${signatureB64}`;
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${signingInput}.${signatureB64}`,
   });
-
   const tokenData = await tokenRes.json();
   if (!tokenData.access_token) {
     throw new Error("Firebase access token not received");
   }
-
-  return tokenData.access_token as string;
+  return tokenData.access_token;
 }
 
-function isPermanentFcmTokenError(errorCode?: string, message?: string): boolean {
-  const code = (errorCode ?? "").toUpperCase();
-  const msg = (message ?? "").toUpperCase();
-  return (
-    code.includes("UNREGISTERED") ||
-    code.includes("NOT_FOUND") ||
-    code.includes("INVALID_ARGUMENT") ||
-    msg.includes("UNREGISTERED") ||
-    msg.includes("REQUESTED ENTITY WAS NOT FOUND") ||
-    msg.includes("INVALID REGISTRATION")
-  );
-}
-
-async function sendFcmToToken(
-  token: string,
-  title: string,
-  body: string,
-  accessToken: string,
-  projectId: string,
-): Promise<{
-  success: boolean;
-  token: string;
-  error?: string;
-  permanentInvalid?: boolean;
-}> {
+async function sendFcmToToken(token, title, body, accessToken, projectId) {
   const payload = {
     message: {
       token,
@@ -145,26 +144,35 @@ async function sendFcmToToken(
     },
   };
 
-  const res = await fetch(
-    `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+  let res;
+  try {
+    res = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    },
-  );
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, token, error: message, permanentInvalid: false };
+  }
 
-  const data = await res.json();
+  let data = {};
+  try {
+    data = await res.json();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, token, error: message, permanentInvalid: false };
+  }
+
   if (!res.ok) {
     const errorCode =
-      typeof data?.error?.status === "string"
-        ? data.error.status
-        : typeof data?.error?.details?.[0]?.errorCode === "string"
-          ? data.error.details[0].errorCode
-          : undefined;
+      typeof data?.error?.status === "string" ? data.error.status : undefined;
     const errorMessage = data?.error?.message ?? "FCM send failed";
     return {
       success: false,
@@ -173,443 +181,325 @@ async function sendFcmToToken(
       permanentInvalid: isPermanentFcmTokenError(errorCode, errorMessage),
     };
   }
-
   return { success: true, token };
 }
 
-async function deleteInvalidToken(token: string): Promise<void> {
+async function deleteInvalidToken(token) {
   const { error } = await supabase
     .from("user_push_tokens")
     .delete()
     .eq("expo_push_token", token);
   if (error) {
     console.log(`${LOG} Token cleanup skipped`, {
-      token: maskToken(token),
+      token: maskPushToken(token),
       error: error.message,
     });
-  } else {
-    console.log(`${LOG} Removed invalid token`, { token: maskToken(token) });
+    return;
   }
+  console.log(`${LOG} Removed invalid token`, { token: maskPushToken(token) });
 }
 
-function isFcmNativeToken(token: string): boolean {
-  return token.includes("APA91");
-}
-
-function json(status: number, body: Record<string, unknown>) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-function isAuthorized(req: Request): boolean {
-  if (!serviceRoleKey) return false;
-  const auth = req.headers.get("Authorization") ?? "";
-  return auth === `Bearer ${serviceRoleKey}`;
-}
-
-function maskToken(token: string): string {
-  if (token.length <= 12) return "***";
-  return `${token.slice(0, 8)}…${token.slice(-4)}`;
-}
-
-function getKolkataNow(date = new Date()): {
-  dateKey: string;
-  hhmm: string;
-  minutes: number;
-} {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-
-  const get = (type: string) =>
-    parts.find((p) => p.type === type)?.value ?? "00";
-
-  const year = get("year");
-  const month = get("month");
-  const day = get("day");
-  let hour = get("hour");
-  const minute = get("minute");
-  if (hour === "24") hour = "00";
-
-  const hhmm = `${hour}:${minute}`;
-  const minutes = Number(hour) * 60 + Number(minute);
-  return { dateKey: `${year}-${month}-${day}`, hhmm, minutes };
-}
-
-function minutesOfDay(hhmm: string): number | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-  if (!match) return null;
-  const h = Number(match[1]);
-  const m = Number(match[2]);
-  if (!Number.isInteger(h) || !Number.isInteger(m) || h > 23 || m > 59) {
-    return null;
+async function listUsersWithBirthDate() {
+  const rows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, first_name, last_name, birth_date")
+      .not("birth_date", "is", null)
+      .order("id", { ascending: true })
+      .range(from, from + USER_PAGE - 1);
+    if (error) throw error;
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < USER_PAGE) break;
+    from += USER_PAGE;
   }
-  return h * 60 + m;
+  return rows;
 }
 
-function normalizeSendTime(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const mins = minutesOfDay(raw);
-  if (mins === null) return null;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-function isSendTimeDue(nowMinutes: number, sendTime: string): boolean {
-  const start = minutesOfDay(sendTime);
-  if (start === null) return false;
-  return nowMinutes >= start && nowMinutes < start + SLOT_WINDOW_MINUTES;
-}
-
-function displayName(user: BirthdayUser): string {
-  const name = [user.first_name, user.last_name]
-    .filter((v) => typeof v === "string" && v.trim())
-    .join(" ")
-    .trim();
-  return name || "Someone";
-}
-
-/**
- * Claim before send. Reclaims stale pending / failure so crashes can retry.
- * Never treats success as reclaimable (true once-per-day).
- */
-async function claimBirthday(
-  userId: string,
-  birthdayDate: string,
-  scheduledKey: string,
-): Promise<{ claimed: boolean; logId?: string }> {
+async function listDigestDevices(mode, allowlistHashes) {
   const { data, error } = await supabase
-    .from("birthday_notification_logs")
-    .insert({
-      birthday_user_id: userId,
-      birthday_date: birthdayDate,
-      scheduled_key: scheduledKey,
-      status: "pending",
-    })
-    .select("id")
-    .maybeSingle();
-
-  if (!error && data?.id) {
-    return { claimed: true, logId: data.id as string };
-  }
-
-  if (error && error.code !== "23505") {
-    throw error;
-  }
-
-  const { data: existing, error: selErr } = await supabase
-    .from("birthday_notification_logs")
-    .select("id, status, created_at")
-    .eq("birthday_user_id", userId)
-    .eq("birthday_date", birthdayDate)
-    .eq("scheduled_key", scheduledKey)
-    .maybeSingle();
-
-  if (selErr) throw selErr;
-  if (!existing?.id) {
-    return { claimed: false };
-  }
-
-  if (existing.status === "success") {
-    console.log(`${LOG} Duplicate prevented`, { userId: userId.slice(0, 8) });
-    return { claimed: false };
-  }
-
-  const createdAtRaw = existing.created_at;
-  const createdAt =
-    typeof createdAtRaw === "string" || typeof createdAtRaw === "number"
-      ? new Date(createdAtRaw).getTime()
-      : 0;
-  const isStalePending =
-    existing.status === "pending" &&
-    Number.isFinite(createdAt) &&
-    Date.now() - createdAt > STALE_PENDING_MS;
-  const canRetry =
-    existing.status === "failure" || isStalePending;
-
-  if (!canRetry) {
-    console.log(`${LOG} Duplicate prevented`, {
-      userId: userId.slice(0, 8),
-      status: existing.status,
-    });
-    return { claimed: false };
-  }
-
-  const { data: updated, error: updErr } = await supabase
-    .from("birthday_notification_logs")
-    .update({
-      status: "pending",
-      error_message: null,
-      sent_at: null,
-      devices_sent: null,
-      devices_failed: null,
-    })
-    .eq("id", existing.id)
-    .in("status", ["failure", "pending"])
-    .select("id")
-    .maybeSingle();
-
-  if (updErr) throw updErr;
-  if (!updated?.id) return { claimed: false };
-
-  console.log(`${LOG} Reclaimed prior attempt`, {
-    userId: userId.slice(0, 8),
-    priorStatus: existing.status,
-  });
-  return { claimed: true, logId: updated.id as string };
-}
-
-async function finalizeLog(
-  logId: string,
-  status: "success" | "failure",
-  errorMessage?: string,
-  devicesSent?: number,
-  devicesFailed?: number,
-) {
-  await supabase
-    .from("birthday_notification_logs")
-    .update({
-      status,
-      sent_at: new Date().toISOString(),
-      error_message: errorMessage ?? null,
-      devices_sent: devicesSent ?? null,
-      devices_failed: devicesFailed ?? null,
-    })
-    .eq("id", logId);
-}
-
-async function sendToAllDevices(
-  title: string,
-  body: string,
-): Promise<{ sent: number; failed: number }> {
-  const projectId = Deno.env.get("FIREBASE_PROJECT_ID");
-  if (!projectId) {
-    throw new Error("Missing FIREBASE_PROJECT_ID");
-  }
-
-  const { data: rows, error } = await supabase
     .from("user_push_tokens")
     .select("user_id, expo_push_token");
-
   if (error) throw error;
 
-  const tokenRows: Array<Record<string, unknown>> = Array.isArray(rows)
-    ? rows
-    : [];
-  const tokens = tokenRows
-    .map((r) => r.expo_push_token)
-    .filter(
-      (t): t is string =>
-        typeof t === "string" && t.length > 0 && isFcmNativeToken(t),
-    );
-
-  const uniqueTokens = [...new Set(tokens)];
-  console.log(`${LOG} Sending FCM`, { deviceCount: uniqueTokens.length });
-
-  if (uniqueTokens.length === 0) {
-    return { sent: 0, failed: 0 };
+  const product = [];
+  const rawByHash = new Map();
+  for (const row of data ?? []) {
+    const token = row.expo_push_token;
+    if (!isBirthdayFcmToken(token)) continue;
+    const hash = await hashToken(token);
+    product.push({ hash, userId: row.user_id });
+    rawByHash.set(hash, token);
   }
 
-  const accessToken = await getFirebaseAccessToken();
-  const firebaseProjectId = projectId;
-
-  const results = await Promise.all(
-    uniqueTokens.map((token) =>
-      sendFcmToToken(token, title, body, accessToken, firebaseProjectId),
-    ),
-  );
-
-  const sent = results.filter((r) => r.success).length;
-  const failed = results.filter((r) => !r.success).length;
-
-  for (const r of results) {
-    if (!r.success) {
-      console.log(`${LOG} FCM failure`, {
-        token: maskToken(r.token),
-        error: r.error ?? "unknown",
-      });
-      if (r.permanentInvalid) {
-        await deleteInvalidToken(r.token);
-      }
-    }
-  }
-
-  if (sent > 0) {
-    console.log(`${LOG} FCM success`, { sent, failed });
-  }
-
-  return { sent, failed };
+  const selected = mode === "staging"
+    ? restrictToTestAllowlist(selectProductRecipients(product), allowlistHashes)
+    : selectProductRecipients(product);
+  return selected.map((recipient) => ({
+    ...recipient,
+    token: rawByHash.get(recipient.hash),
+  })).filter((recipient) => typeof recipient.token === "string");
 }
 
-async function processBirthdayUser(
-  user: BirthdayUser,
-  birthdayDate: string,
-  scheduledKey: string,
-): Promise<Record<string, unknown>> {
-  const claim = await claimBirthday(user.id, birthdayDate, scheduledKey);
-  if (!claim.claimed || !claim.logId) {
-    return {
-      birthdayUserId: user.id.slice(0, 8),
-      status: "duplicate_prevented",
-    };
+async function loadDigest(dateKey) {
+  const { data, error } = await supabase
+    .from("birthday_notification_digests")
+    .select("id, status, body, locked_at, lock_token")
+    .eq("birthday_date", dateKey)
+    .eq("scheduled_key", BIRTHDAY_SCHEDULED_KEY)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function loadSucceededHashes(digestId) {
+  const { data, error } = await supabase
+    .from("birthday_notification_device_deliveries")
+    .select("token_hash")
+    .eq("digest_id", digestId)
+    .eq("status", "success");
+  if (error) throw error;
+  return new Set((data ?? []).map((row) => row.token_hash));
+}
+
+async function writeReturningId(run) {
+  let lastError = "write failed";
+  for (let attempt = 1; attempt <= DIGEST_STATUS_WRITE_ATTEMPTS; attempt++) {
+    const { data, error } = await run();
+    if (!error && data?.id) return { ok: true, id: data.id, lockToken: data.lock_token };
+    lastError = error?.message ?? "write was not persisted";
   }
+  return { ok: false, error: lastError };
+}
 
-  const name = displayName(user);
-  const body = `Today is ${name}'s birthday! 🎉 Wish them a very Happy Birthday!`;
-
-  try {
-    const { sent, failed } = await sendToAllDevices(TITLE, body);
-
-    if (sent === 0 && failed === 0) {
-      // No tokens — not a permanent success; allow retry later.
-      await finalizeLog(
-        claim.logId,
-        "failure",
-        "No valid device tokens",
-        0,
-        0,
-      );
-      return {
-        birthdayUserId: user.id.slice(0, 8),
-        status: "failure",
-        sent: 0,
-        failed: 0,
-        reason: "no_tokens",
-      };
-    }
-
-    if (sent === 0 && failed > 0) {
-      await finalizeLog(
-        claim.logId,
-        "failure",
-        `All ${failed} FCM sends failed`,
-        sent,
-        failed,
-      );
-      return {
-        birthdayUserId: user.id.slice(0, 8),
-        status: "failure",
-        sent,
-        failed,
-      };
-    }
-
-    await finalizeLog(
-      claim.logId,
-      "success",
-      failed > 0 ? `${failed} device(s) failed` : undefined,
-      sent,
-      failed,
+async function claimDigest(dateKey, body, birthdayCount, existing, decision) {
+  if (decision.action === "send" && decision.mode === "insert") {
+    const lockToken = crypto.randomUUID();
+    const wrote = await writeReturningId(() =>
+      supabase
+        .from("birthday_notification_digests")
+        .insert({
+          birthday_date: dateKey,
+          scheduled_key: BIRTHDAY_SCHEDULED_KEY,
+          status: "pending",
+          title: BIRTHDAY_DIGEST_TITLE,
+          body,
+          birthday_count: birthdayCount,
+          lock_token: lockToken,
+          locked_at: new Date().toISOString(),
+        })
+        .select("id, lock_token")
+        .maybeSingle(),
     );
-    return {
-      birthdayUserId: user.id.slice(0, 8),
-      status: "success",
-      sent,
-      failed,
-    };
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    console.log(`${LOG} FCM failure`, { error: message });
-    await finalizeLog(claim.logId, "failure", message);
-    return {
-      birthdayUserId: user.id.slice(0, 8),
-      status: "failure",
-      error: message,
-    };
+    if (wrote.ok) {
+      return {
+        claimed: true,
+        finalizeOnly: false,
+        id: wrote.id,
+        lockToken: wrote.lockToken,
+      };
+    }
+    const again = await loadDigest(dateKey);
+    if (!again?.id) throw new Error(wrote.error);
+    return { claimed: false, reason: "in_flight" };
   }
+
+  const lockToken = crypto.randomUUID();
+  const nowIso = new Date().toISOString();
+  let update = supabase
+    .from("birthday_notification_digests")
+    .update({
+      status: "pending",
+      lock_token: lockToken,
+      locked_at: nowIso,
+      updated_at: nowIso,
+      error_message: null,
+    })
+    .eq("id", existing.id)
+    .eq("birthday_date", dateKey)
+    .eq("scheduled_key", BIRTHDAY_SCHEDULED_KEY);
+
+  if (existing.status === "pending") {
+    const cutoff = new Date(Date.now() - BIRTHDAY_STALE_PENDING_MS).toISOString();
+    update = update.eq("status", "pending").lt("locked_at", cutoff);
+  } else {
+    update = update.in("status", ["partial", "failure"]);
+  }
+
+  const wrote = await writeReturningId(() =>
+    update.select("id, lock_token").maybeSingle(),
+  );
+  if (!wrote.ok) return { claimed: false, reason: "in_flight" };
+  return {
+    claimed: true,
+    finalizeOnly: decision.action === "finalize",
+    id: wrote.id,
+    lockToken: wrote.lockToken,
+  };
+}
+
+async function recordDevice(digestId, hash, status, errorMessage) {
+  const wrote = await writeReturningId(() =>
+    supabase
+      .from("birthday_notification_device_deliveries")
+      .upsert(
+        {
+          digest_id: digestId,
+          token_hash: hash,
+          status,
+          error_message: errorMessage ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "digest_id,token_hash" },
+      )
+      .select("id")
+      .maybeSingle(),
+  );
+  return wrote.ok;
+}
+
+async function persistDigestStatus(digestId, lockToken, status, errorMessage) {
+  const wrote = await writeReturningId(() =>
+    supabase
+      .from("birthday_notification_digests")
+      .update({
+        status,
+        sent_at: new Date().toISOString(),
+        error_message: errorMessage ?? null,
+        updated_at: new Date().toISOString(),
+        lock_token: null,
+        locked_at: null,
+      })
+      .eq("id", digestId)
+      .eq("lock_token", lockToken)
+      .select("id")
+      .maybeSingle(),
+  );
+  if (!wrote.ok) {
+    throw new Error(`Digest status was not persisted: ${wrote.error}`);
+  }
+}
+
+async function deliverDigest(targets, title, body) {
+  const projectId = Deno.env.get("FIREBASE_PROJECT_ID");
+  if (!projectId) throw new Error("Missing FIREBASE_PROJECT_ID");
+  const accessToken = targets.length > 0 ? await getFirebaseAccessToken() : "";
+  const outcomes = [];
+
+  for (let index = 0; index < targets.length; index += BIRTHDAY_FCM_CHUNK) {
+    const chunk = targets.slice(index, index + BIRTHDAY_FCM_CHUNK);
+    const settled = await Promise.allSettled(
+      chunk.map((target) =>
+        sendFcmToToken(target.token, title, body, accessToken, projectId),
+      ),
+    );
+
+    for (let offset = 0; offset < chunk.length; offset++) {
+      const target = chunk[offset];
+      const settledItem = settled[offset];
+      if (settledItem.status === "rejected") {
+        const reason = settledItem.reason instanceof Error
+          ? settledItem.reason.message
+          : String(settledItem.reason);
+        outcomes.push({ hash: target.hash, status: "failure", error: reason, token: target.token });
+        continue;
+      }
+      const result = settledItem.value;
+      if (result.success) {
+        outcomes.push({ hash: target.hash, status: "success", token: target.token });
+        continue;
+      }
+      console.log(`${LOG} FCM failure`, {
+        token: maskPushToken(target.token),
+        error: result.error ?? "unknown",
+      });
+      if (result.permanentInvalid) await deleteInvalidToken(target.token);
+      outcomes.push({
+        hash: target.hash,
+        status: "failure",
+        error: result.error ?? "FCM send failed",
+        token: target.token,
+      });
+    }
+  }
+
+  return outcomes;
 }
 
 Deno.serve(async (req) => {
   console.log(`${LOG} Started`);
-
   try {
-    if (req.method !== "POST") {
-      return json(405, { ok: false, error: "Method not allowed" });
-    }
-
+    if (req.method !== "POST") return json(405, { ok: false, error: "Method not allowed" });
     if (!supabaseUrl || !serviceRoleKey) {
       return json(503, { ok: false, error: "Server configuration incomplete" });
     }
-
     if (!isAuthorized(req)) {
       console.log(`${LOG} Unauthorized`);
       return json(401, { ok: false, error: "Unauthorized" });
     }
 
-    let body: { force?: boolean } = {};
+    const testTokens = parseTestTokenAllowlist(Deno.env.get("BIRTHDAY_PUSH_TEST_TOKENS"));
+    const gate = evaluateBirthdayDeliveryGate({
+      deliveryFlag: Deno.env.get("BIRTHDAY_PUSH_DELIVERY"),
+      supabaseUrl,
+      testTokens,
+    });
+    if (!gate.allowed) {
+      console.log(`${LOG} Completed`, { skipped: gate.reason });
+      return json(200, { ok: true, skipped: gate.reason });
+    }
+
+    let requestBody = {};
     try {
       const text = await req.text();
-      if (text.trim()) {
-        body = JSON.parse(text) as { force?: boolean };
-      }
+      if (text.trim()) requestBody = JSON.parse(text);
     } catch {
       return json(400, { ok: false, error: "Invalid JSON body" });
     }
+    if (requestBody.force === true) {
+      return json(200, { ok: true, skipped: "force_disabled" });
+    }
+    const dryRun = requestBody.dryRun === true;
 
-    const force = body.force === true;
-    const { dateKey, hhmm, minutes } = getKolkataNow();
-
+    const { dateKey, hhmm, minutes } = getKolkataClock();
     const { data: settings, error: settingsError } = await supabase
       .from("birthday_notification_settings")
       .select("enabled, send_time")
       .eq("id", 1)
       .maybeSingle();
-
     if (settingsError) throw settingsError;
 
-    const settingsRow = settings as SettingsRow | null;
-    const enabled = settingsRow?.enabled !== false;
-    const sendTime = normalizeSendTime(settingsRow?.send_time ?? "09:00");
+    const enabled = settings?.enabled !== false;
+    const sendTime = normalizeSendTime(settings?.send_time ?? "09:00");
+    if (!enabled) return json(200, { ok: true, skipped: "disabled" });
+    if (!sendTime) return json(200, { ok: true, skipped: "invalid_send_time" });
 
-    if (!force && !enabled) {
-      console.log(`${LOG} Completed`, { skipped: "disabled" });
-      return json(200, { ok: true, skipped: "disabled" });
+    let users = [];
+    const rpc = await supabase.rpc("list_users_with_birthday_on", { p_date: dateKey });
+    if (!rpc.error && Array.isArray(rpc.data)) {
+      users = rpc.data.map((row) => ({
+        id: row.id,
+        first_name: row.first_name ?? null,
+        last_name: row.last_name ?? null,
+        birth_date: dateKey,
+      }));
+    } else {
+      users = (await listUsersWithBirthDate()).filter((user) =>
+        isBirthdayOnKolkataDate(user.birth_date, dateKey),
+      );
     }
-
-    if (!sendTime) {
-      console.log(`${LOG} Completed`, { skipped: "invalid_send_time" });
-      return json(200, { ok: true, skipped: "invalid_send_time" });
-    }
-
-    if (!force && !isSendTimeDue(minutes, sendTime)) {
-      console.log(`${LOG} Completed`, {
-        skipped: "not_due",
-        sendTime,
-        kolkataTime: hhmm,
-      });
-      return json(200, {
-        ok: true,
-        skipped: "not_due",
-        sendTime,
-        kolkataTime: hhmm,
-        date: dateKey,
-      });
-    }
-
-    const { data: birthdayUsers, error: usersError } = await supabase.rpc(
-      "list_users_with_birthday_on",
-      { p_date: dateKey },
+    const names = orderedBirthdayNames(
+      users.map((user) => ({
+        id: user.id,
+        firstName: user.first_name,
+        lastName: user.last_name,
+      })),
     );
-
-    if (usersError) throw usersError;
-
-    const users = (birthdayUsers ?? []) as BirthdayUser[];
-    console.log(`${LOG} Birthday users`, {
-      date: dateKey,
-      count: users.length,
-    });
-
-    if (users.length === 0) {
-      console.log(`${LOG} Completed`, { skipped: "no_birthdays", date: dateKey });
+    const body = formatBirthdayDigestBody(names);
+    console.log(`${LOG} Birthday users`, { date: dateKey, count: names.length });
+    if (!body) {
       return json(200, {
         ok: true,
         skipped: "no_birthdays",
@@ -618,39 +508,123 @@ Deno.serve(async (req) => {
       });
     }
 
-    const scheduledKey = force
-      ? `manual_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`
-      : SCHEDULED_KEY;
-
-    const toProcess = users.slice(0, MAX_BIRTHDAYS_PER_RUN);
-    const results: Record<string, unknown>[] = [];
-
-    for (const user of toProcess) {
-      results.push(await processBirthdayUser(user, dateKey, scheduledKey));
+    const allowlistHashes = new Set();
+    for (const token of testTokens) allowlistHashes.add(await hashToken(token));
+    const recipients = await listDigestDevices(gate.mode, allowlistHashes);
+    if (recipients.length === 0) {
+      return json(200, {
+        ok: true,
+        skipped: "no_authorized_tokens",
+        date: dateKey,
+        kolkataTime: hhmm,
+        birthdayCount: names.length,
+      });
     }
+
+    const existing = await loadDigest(dateKey);
+    const succeeded = existing?.id
+      ? await loadSucceededHashes(existing.id)
+      : new Set();
+    const pending = pendingTokenTargets(recipients, succeeded);
+    const decision = decideDigestAttempt({
+      birthdayCount: names.length,
+      nowMinutes: minutes,
+      sendTime,
+      existing: existing
+        ? {
+            status: existing.status,
+            lockedAtMs: existing.locked_at ? new Date(existing.locked_at).getTime() : null,
+            body: existing.body,
+          }
+        : null,
+      nowMs: Date.now(),
+      undeliveredCount: pending.length,
+      deliveredCount: succeeded.size,
+    });
+
+    if (decision.action === "skip") {
+      console.log(`${LOG} Completed`, { skipped: decision.reason, kolkataTime: hhmm });
+      return json(200, {
+        ok: true,
+        skipped: decision.reason,
+        date: dateKey,
+        kolkataTime: hhmm,
+        birthdayCount: names.length,
+      });
+    }
+
+    const digestBody = existing?.body || body;
+    if (dryRun) {
+      return json(200, {
+        ok: true,
+        dryRun: true,
+        date: dateKey,
+        kolkataTime: hhmm,
+        birthdayCount: names.length,
+        recipientCount: pending.length,
+        decision: decision.action,
+        projectRef: gate.projectRef,
+      });
+    }
+
+    const claim = await claimDigest(
+      dateKey,
+      digestBody,
+      names.length,
+      existing,
+      decision,
+    );
+    if (!claim.claimed) {
+      return json(200, { ok: true, skipped: claim.reason ?? "in_flight", date: dateKey });
+    }
+
+    let outcomes = [];
+    if (!claim.finalizeOnly) {
+      const targets = pending.filter((target) => typeof target.token === "string");
+      const sent = await deliverDigest(targets, BIRTHDAY_DIGEST_TITLE, digestBody);
+      outcomes = [];
+      for (const item of sent) {
+        const recorded = await recordDevice(
+          claim.id,
+          item.hash,
+          item.status === "success" ? "success" : "failure",
+          item.error,
+        );
+        outcomes.push({
+          hash: item.hash,
+          status: recorded ? (item.status === "success" ? "success" : "failure") : "unrecorded",
+        });
+      }
+    }
+
+    const summary = summarizeDeliveryAttempt({
+      targets: pending.map((target) => target.hash),
+      outcomes,
+    });
+    const status = claim.finalizeOnly ? "success" : summary.status;
+    const errorMessage = summary.failed.length + summary.unrecorded.length > 0
+      ? `${summary.failed.length} failed, ${summary.unrecorded.length} unrecorded`
+      : null;
+    await persistDigestStatus(claim.id, claim.lockToken, status, errorMessage);
 
     console.log(`${LOG} Completed`, {
       date: dateKey,
-      kolkataTime: hhmm,
-      force,
-      birthdayCount: users.length,
-      processed: results.length,
-      truncated: users.length > MAX_BIRTHDAYS_PER_RUN,
+      status,
+      sent: summary.succeeded.length,
+      failed: summary.failed.length,
     });
-
     return json(200, {
       ok: true,
       date: dateKey,
       kolkataTime: hhmm,
-      sendTime,
-      force,
-      birthdayCount: users.length,
-      processed: results.length,
-      truncated: users.length > MAX_BIRTHDAYS_PER_RUN,
-      results,
+      birthdayCount: names.length,
+      status,
+      sent: summary.succeeded.length,
+      failed: summary.failed.length,
+      unrecorded: summary.unrecorded.length,
     });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.log(`${LOG} Completed`, { error: message });
     return json(500, { ok: false, error: message });
   }

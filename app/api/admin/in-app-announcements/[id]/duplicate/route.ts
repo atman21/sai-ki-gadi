@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/in-app-announcements/admin-api";
+import { requireAdminPermission } from "@/lib/in-app-announcements/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, context: Ctx) {
-  const auth = await requireAdminApi();
+  const auth = await requireAdminPermission("announcements.manage", {
+    request,
+    auditModule: "announcements",
+  });
   if (!auth.ok) return auth.response;
 
   const { id } = await context.params;

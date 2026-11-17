@@ -29,7 +29,18 @@ export type AdminNavTabKey =
   | "membership-management"
   | "admin-users"
   | "admin-roles"
-  | "audit-logs";
+  | "audit-logs"
+  | "ai-dashboard"
+  | "ai-settings"
+  | "ai-knowledge-base"
+  | "ai-knowledge-import"
+  | "ai-instructions"
+  | "ai-faq-help"
+  | "ai-tools"
+  | "ai-test-assistant"
+  | "ai-conversations"
+  | "ai-usage"
+  | "ai-security-audit";
 
 type NavIconConfig = {
   bgClass: string;
@@ -384,6 +395,121 @@ const NAV_ICON_CONFIG: Record<AdminNavTabKey, NavIconConfig> = {
         <path d="M16 13H8" />
         <path d="M16 17H8" />
         <path d="M10 9H8" />
+      </NavSvg>
+    ),
+  },
+  "ai-dashboard": {
+    bgClass: "bg-cyan-100",
+    colorClass: "text-cyan-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M12 2a7 7 0 0 1 7 7c0 3-2 5-4 7l-3 3-3-3c-2-2-4-4-4-7a7 7 0 0 1 7-7z" />
+        <path d="M9.5 9.5h.01" />
+        <path d="M14.5 9.5h.01" />
+        <path d="M9 13c.8.8 1.9 1.2 3 1.2s2.2-.4 3-1.2" />
+      </NavSvg>
+    ),
+  },
+  "ai-settings": {
+    bgClass: "bg-cyan-100",
+    colorClass: "text-cyan-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      </NavSvg>
+    ),
+  },
+  "ai-knowledge-base": {
+    bgClass: "bg-teal-100",
+    colorClass: "text-teal-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      </NavSvg>
+    ),
+  },
+  "ai-knowledge-import": {
+    bgClass: "bg-teal-100",
+    colorClass: "text-teal-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M12 15V3" />
+      </NavSvg>
+    ),
+  },
+  "ai-instructions": {
+    bgClass: "bg-sky-100",
+    colorClass: "text-sky-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+      </NavSvg>
+    ),
+  },
+  "ai-faq-help": {
+    bgClass: "bg-blue-100",
+    colorClass: "text-blue-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+        <path d="M12 17h.01" />
+      </NavSvg>
+    ),
+  },
+  "ai-tools": {
+    bgClass: "bg-indigo-100",
+    colorClass: "text-indigo-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+      </NavSvg>
+    ),
+  },
+  "ai-test-assistant": {
+    bgClass: "bg-violet-100",
+    colorClass: "text-violet-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M9 18h6" />
+        <path d="M10 22h4" />
+        <path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z" />
+      </NavSvg>
+    ),
+  },
+  "ai-conversations": {
+    bgClass: "bg-fuchsia-100",
+    colorClass: "text-fuchsia-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M21 15a4 4 0 0 1-4 4H7l-4 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+      </NavSvg>
+    ),
+  },
+  "ai-usage": {
+    bgClass: "bg-amber-100",
+    colorClass: "text-amber-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M3 3v18h18" />
+        <path d="M7 14v4" />
+        <path d="M12 10v8" />
+        <path d="M17 6v12" />
+      </NavSvg>
+    ),
+  },
+  "ai-security-audit": {
+    bgClass: "bg-rose-100",
+    colorClass: "text-rose-700",
+    icon: (
+      <NavSvg className="h-4 w-4">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+        <path d="m9 12 2 2 4-4" />
       </NavSvg>
     ),
   },

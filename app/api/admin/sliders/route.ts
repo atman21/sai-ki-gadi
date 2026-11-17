@@ -1,4 +1,4 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextResponse } from "next/server";
 
@@ -9,7 +9,10 @@ function normalizeMediaType(value: unknown): "image" | "video" {
 }
 
 export async function POST(req: Request) {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("sliders.manage", {
+    request: req,
+    auditModule: "sliders",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {
@@ -77,7 +80,7 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json(data);
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         error: "Something went wrong",

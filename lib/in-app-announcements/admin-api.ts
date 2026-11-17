@@ -4,5 +4,6 @@
  */
 export {
   requireAdminApi,
+  requireAdminPermission,
   safeErrorMessage,
 } from "@/lib/admin-api";

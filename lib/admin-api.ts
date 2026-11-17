@@ -86,6 +86,35 @@ export async function requireAdminApi(): Promise<AdminApiOk | AdminApiDenied> {
 }
 
 /**
+ * 403 + permission_denied audit for an already-authenticated actor.
+ * Use when a route needs field-level permission checks after requireAdminApi.
+ */
+export function permissionDeniedResponse(
+  actor: AdminActor,
+  permission: AdminPermission,
+  opts?: { request?: Request; auditModule?: string },
+): NextResponse {
+  void writeAdminAuditLog({
+    actor,
+    action: "permission_denied",
+    module: opts?.auditModule ?? "security",
+    description: `Permission denied for ${permission}`,
+    success: false,
+    metadata: { permission },
+    ipAddress: opts?.request
+      ? opts.request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        undefined
+      : undefined,
+    userAgent: opts?.request?.headers.get("user-agent") || undefined,
+  });
+
+  return NextResponse.json(
+    { ok: false, error: "Forbidden — insufficient permissions." },
+    { status: 403 },
+  );
+}
+
+/**
  * Require authenticated admin + a specific permission.
  * Super Admin always passes. Denied attempts are audited (best-effort).
  */
@@ -97,45 +126,21 @@ export async function requireAdminPermission(
   if (!gate.ok) return gate;
 
   if (!actorHasPermission(gate.actor, permission)) {
-    void writeAdminAuditLog({
-      actor: gate.actor,
-      action: "permission_denied",
-      module: opts?.auditModule ?? "security",
-      description: `Permission denied for ${permission}`,
-      success: false,
-      metadata: { permission },
-      ipAddress: opts?.request
-        ? opts.request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-          undefined
-        : undefined,
-      userAgent: opts?.request?.headers.get("user-agent") || undefined,
-    });
-
     return {
       ok: false,
-      response: NextResponse.json(
-        { ok: false, error: "Forbidden — insufficient permissions." },
-        { status: 403 },
-      ),
+      response: permissionDeniedResponse(gate.actor, permission, opts),
     };
   }
 
   return gate;
 }
 
-export function safeErrorMessage(error: unknown, fallback: string): string {
-  if (
-    error &&
-    typeof error === "object" &&
-    "message" in error &&
-    typeof (error as { message: unknown }).message === "string"
-  ) {
-    const message = (error as { message: string }).message;
-    if (/permission denied|rls|jwt|service.role/i.test(message)) {
-      return fallback;
-    }
-    return message;
-  }
+/**
+ * Client-safe error text. Never returns raw database/internal messages.
+ * Callers should keep diagnostics in audit logs (reason field), not responses.
+ * Expected validation messages must be returned explicitly by the route.
+ */
+export function safeErrorMessage(_error: unknown, fallback: string): string {
   return fallback;
 }
 

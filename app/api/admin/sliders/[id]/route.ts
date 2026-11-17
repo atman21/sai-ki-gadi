@@ -1,4 +1,4 @@
-import { requireAdminApi } from "@/lib/admin-api";
+import { requireAdminPermission } from "@/lib/admin-api";
 import { clientMetaFromRequest, recordFailure, recordSuccess } from "@/lib/admin-audit";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -14,7 +14,10 @@ function normalizeMediaType(value: unknown): "image" | "video" {
 }
 
 export async function PUT(req: NextRequest, context: Context) {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("sliders.manage", {
+    request: req,
+    auditModule: "sliders",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {
@@ -99,7 +102,7 @@ export async function PUT(req: NextRequest, context: Context) {
     });
 
     return NextResponse.json(data);
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         error: "Something went wrong",
@@ -112,7 +115,10 @@ export async function PUT(req: NextRequest, context: Context) {
 }
 
 export async function DELETE(req: NextRequest, context: Context) {
-  const __adminGate = await requireAdminApi();
+  const __adminGate = await requireAdminPermission("sliders.manage", {
+    request: req,
+    auditModule: "sliders",
+  });
   if (!__adminGate.ok) return __adminGate.response;
 
   try {
@@ -161,7 +167,7 @@ export async function DELETE(req: NextRequest, context: Context) {
     return NextResponse.json({
       success: true,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         error: "Something went wrong",

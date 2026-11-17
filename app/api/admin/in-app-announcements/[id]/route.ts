@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import {
-  requireAdminApi,
+  requireAdminPermission,
   safeErrorMessage,
 } from "@/lib/in-app-announcements/admin-api";
 import { clientMetaFromRequest, recordChange, recordFailure, recordSuccess } from "@/lib/admin-audit";
@@ -10,7 +10,9 @@ import { validateAnnouncementConfig } from "@/lib/in-app-announcements/types";
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, context: Ctx) {
-  const auth = await requireAdminApi();
+  const auth = await requireAdminPermission("announcements.view", {
+    auditModule: "announcements",
+  });
   if (!auth.ok) return auth.response;
 
   const { id } = await context.params;
@@ -52,7 +54,10 @@ function truncateAuditValue(value: unknown): unknown {
 }
 
 export async function PUT(request: Request, context: Ctx) {
-  const auth = await requireAdminApi();
+  const auth = await requireAdminPermission("announcements.manage", {
+    request,
+    auditModule: "announcements",
+  });
   if (!auth.ok) return auth.response;
 
   try {
@@ -213,7 +218,10 @@ export async function PUT(request: Request, context: Ctx) {
 }
 
 export async function DELETE(request: Request, context: Ctx) {
-  const auth = await requireAdminApi();
+  const auth = await requireAdminPermission("announcements.manage", {
+    request,
+    auditModule: "announcements",
+  });
   if (!auth.ok) return auth.response;
 
   const { id } = await context.params;

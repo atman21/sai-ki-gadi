@@ -2,6 +2,9 @@
  * Canonical Admin Panel permission keys.
  * Must stay in sync with seeded rows in migrations 065+ (e.g. 068 for
  * members.convert_regular_to_gold).
+ * Must stay in sync with seeded rows in migration 065 (+ later seeds).
+ * `listings.fare_view` also requires a DB seed (see A18-DB fare-masking migration);
+ * Super Admin receives it in-app via allPermissionsSet() / isSuperAdmin bypass.
  */
 
 export const ADMIN_PERMISSIONS = [
@@ -21,6 +24,8 @@ export const ADMIN_PERMISSIONS = [
   "profile_changes.reject",
   "requirements.view",
   "exchanges.view",
+  /** Full raw requirements.price / exchange_listings.price in Admin. */
+  "listings.fare_view",
   "fraud.view",
   "fraud.manage",
   "reviews.view",
@@ -31,6 +36,8 @@ export const ADMIN_PERMISSIONS = [
   "help.manage",
   "help_ai.view",
   "help_ai.manage",
+  "reviews.view",
+  "reviews.moderate",
   "cities.view",
   "cities.manage",
   "sliders.view",
@@ -51,6 +58,12 @@ export const ADMIN_PERMISSIONS = [
   "birthday.manage",
   "lucky_draw.view",
   "lucky_draw.manage",
+  /** Help Center FAQ (Mobile T29 / Admin AI Management Console). */
+  "help.view",
+  "help.manage",
+  /** SKG AI Voice / settings / analytics (Mobile T29 help_ai.*). */
+  "help_ai.view",
+  "help_ai.manage",
   "admins.view",
   "admins.manage",
   "roles.manage",
@@ -86,6 +99,7 @@ export const TAB_PERMISSION_MAP: Record<string, AdminPermission> = {
   "disputed-numbers": "disputed_numbers.view",
   "help-center": "help.view",
   "help-ai": "help_ai.view",
+  "member-reviews": "reviews.view",
   cities: "cities.view",
   sliders: "sliders.view",
   winners: "winners.view",
@@ -98,6 +112,18 @@ export const TAB_PERMISSION_MAP: Record<string, AdminPermission> = {
   "admin-users": "admins.view",
   "admin-roles": "roles.manage",
   "audit-logs": "audit_logs.view",
+  // SKG AI Management Console (Phase 1 shell)
+  "ai-dashboard": "help_ai.view",
+  "ai-settings": "help_ai.manage",
+  "ai-knowledge-base": "help_ai.view",
+  "ai-knowledge-import": "help_ai.manage",
+  "ai-instructions": "help_ai.view",
+  "ai-faq-help": "help.view",
+  "ai-tools": "help_ai.manage",
+  "ai-test-assistant": "help_ai.manage",
+  "ai-conversations": "help_ai.view",
+  "ai-usage": "help_ai.view",
+  "ai-security-audit": "help_ai.view",
 };
 
 export const PERMISSION_MODULES: {
@@ -140,7 +166,11 @@ export const PERMISSION_MODULES: {
   {
     module: "listings",
     label: "Requirements & Exchanges",
-    permissions: ["requirements.view", "exchanges.view"],
+    permissions: [
+      "requirements.view",
+      "exchanges.view",
+      "listings.fare_view",
+    ],
   },
   {
     module: "fraud",
@@ -166,6 +196,11 @@ export const PERMISSION_MODULES: {
     module: "help_ai",
     label: "Help AI Voice",
     permissions: ["help_ai.view", "help_ai.manage"],
+  },
+  {
+    module: "reviews",
+    label: "Member Reviews",
+    permissions: ["reviews.view", "reviews.moderate"],
   },
   {
     module: "content",
@@ -205,6 +240,16 @@ export const PERMISSION_MODULES: {
       "lucky_draw.manage",
       "settings.view",
     ],
+  },
+  {
+    module: "help",
+    label: "Help Center FAQ",
+    permissions: ["help.view", "help.manage"],
+  },
+  {
+    module: "help_ai",
+    label: "SKG AI Management",
+    permissions: ["help_ai.view", "help_ai.manage"],
   },
   {
     module: "administration",
