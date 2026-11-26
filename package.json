@@ -18,6 +18,7 @@
     "test:ai-settings-phase2e": "node scripts/verify-ai-settings-phase2e.mjs",
     "test:ai-knowledge-phase3b": "node scripts/verify-ai-knowledge-phase3b.mjs",
     "test:ai-knowledge-import-phase3c": "node scripts/verify-ai-knowledge-import-phase3c.mjs",
+    "test:app-maintenance-mode": "node scripts/verify-app-maintenance-mode.mjs",
     "test:admin-helpers": "node scripts/verify-admin-feature-helpers.mjs",
     "test:phone-actions": "node scripts/verify-phone-actions.mjs",
     "test:admin-audit": "node scripts/verify-admin-audit-helpers.mjs",

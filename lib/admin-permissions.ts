@@ -53,6 +53,9 @@ export const ADMIN_PERMISSIONS = [
   /** SKG AI Voice / settings / analytics (Mobile T29 help_ai.*). */
   "help_ai.view",
   "help_ai.manage",
+  /** App-wide Maintenance Mode + allowlist. */
+  "app.view",
+  "app.manage",
   "admins.view",
   "admins.manage",
   "roles.manage",
@@ -109,6 +112,7 @@ export const TAB_PERMISSION_MAP: Record<string, AdminPermission> = {
   "ai-conversations": "help_ai.view",
   "ai-usage": "help_ai.view",
   "ai-security-audit": "help_ai.view",
+  "app-maintenance": "app.view",
 };
 
 export const PERMISSION_MODULES: {
@@ -214,6 +218,11 @@ export const PERMISSION_MODULES: {
     module: "help_ai",
     label: "SKG AI Management",
     permissions: ["help_ai.view", "help_ai.manage"],
+  },
+  {
+    module: "app",
+    label: "App Management",
+    permissions: ["app.view", "app.manage"],
   },
   {
     module: "administration",

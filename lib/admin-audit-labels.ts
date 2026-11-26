@@ -68,6 +68,14 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   media_uploaded: "Media Uploaded",
   admin_notifications_marked_read: "Admin Notifications Marked Read",
   audit_logs_exported: "Audit Logs Exported",
+  "app.maintenance.enable": "App Maintenance Enabled",
+  "app.maintenance.disable": "App Maintenance Disabled",
+  "app.maintenance.update": "App Maintenance Updated",
+  "app.maintenance.allowlist.create": "Maintenance Allowlist Number Added",
+  "app.maintenance.allowlist.update": "Maintenance Allowlist Updated",
+  "app.maintenance.allowlist.delete": "Maintenance Allowlist Number Removed",
+  "app.maintenance.owners.create": "Maintenance Owner Bypass Added",
+  "app.maintenance.owners.delete": "Maintenance Owner Bypass Removed",
 };
 
 export function auditActionLabel(action: string): string {

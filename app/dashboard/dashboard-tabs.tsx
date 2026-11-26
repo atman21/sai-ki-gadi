@@ -38,6 +38,7 @@ import { AdminRolesPanel } from "@/components/admin/admin-roles-panel";
 import { AuditLogsPanel } from "@/components/admin/audit-logs-panel";
 import { MemberReviewsPanel } from "@/components/admin/member-reviews-panel";
 import { AiManagementAccessGate } from "@/components/admin/ai-management-access-gate";
+import { AppManagementAccessGate } from "@/components/admin/app-management-access-gate";
 import { PhoneNumberAction } from "@/components/admin/phone-number-action";
 import { useAdminAccessOptional } from "@/components/admin/admin-access-provider";
 import { TAB_PERMISSION_MAP } from "@/lib/admin-permissions";
@@ -48,6 +49,13 @@ import {
   isAiManagementNavGroupTitle,
   isAiManagementTabKey,
 } from "@/lib/ai-management-nav";
+import {
+  APP_MANAGEMENT_NAV_GROUP_TITLE,
+  APP_MANAGEMENT_NAV_ITEMS,
+  APP_MANAGEMENT_TAB_KEYS,
+  isAppManagementNavGroupTitle,
+  isAppManagementTabKey,
+} from "@/lib/app-management-nav";
 import {
   formatListingFareForDisplay,
   formatListingFareForExport,
@@ -452,7 +460,8 @@ type TabKey =
   | "admin-users"
   | "admin-roles"
   | "audit-logs"
-  | (typeof AI_MANAGEMENT_TAB_KEYS)[number];
+  | (typeof AI_MANAGEMENT_TAB_KEYS)[number]
+  | (typeof APP_MANAGEMENT_TAB_KEYS)[number];
 
 const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "overview",
@@ -482,6 +491,7 @@ const TAB_KEYS: ReadonlySet<string> = new Set<TabKey>([
   "admin-roles",
   "audit-logs",
   ...AI_MANAGEMENT_TAB_KEYS,
+  ...APP_MANAGEMENT_TAB_KEYS,
 ]);
 
 function parseTabKey(value: string | null | undefined): TabKey {
@@ -2090,6 +2100,13 @@ export function DashboardTabs({
         })),
       },
       {
+        title: APP_MANAGEMENT_NAV_GROUP_TITLE,
+        items: APP_MANAGEMENT_NAV_ITEMS.map((item) => ({
+          key: item.key as TabKey,
+          label: item.label,
+        })),
+      },
+      {
         title: "Administration",
         items: [
           { key: "admin-users" as TabKey, label: "Admin Users" },
@@ -2121,12 +2138,13 @@ export function DashboardTabs({
       adminAccess && !adminAccess.loading && adminAccess.me,
     );
 
-    // Until /api/admin/me loads (or provider missing), keep non-AI nav visible
-    // to avoid flash-lockout, but never reveal AI Management items.
+    // Until /api/admin/me loads (or provider missing), keep non-gated nav visible
+    // to avoid flash-lockout, but never reveal AI / App Management items.
     if (!permissionsReady) {
       return navGroups
         .map((section) =>
-          isAiManagementNavGroupTitle(section.title)
+          isAiManagementNavGroupTitle(section.title) ||
+          isAppManagementNavGroupTitle(section.title)
             ? { ...section, items: [] }
             : section,
         )
@@ -5790,6 +5808,8 @@ export function DashboardTabs({
         <AuditLogsPanel />
       ) : isAiManagementTabKey(activeTab) ? (
         <AiManagementAccessGate tabKey={activeTab} />
+      ) : isAppManagementTabKey(activeTab) ? (
+        <AppManagementAccessGate tabKey={activeTab} />
       ) : activeTab === "about-us" ? (
         <AboutUsAdminPanel />
       ) : activeTab === "wallet-management" ? (
